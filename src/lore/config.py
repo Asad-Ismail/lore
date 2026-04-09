@@ -58,7 +58,7 @@ WIKI_CATEGORIES = [
 ]
 
 # ── Evolving agent / RL ───────────────────────────────────────────────────────
-TRAIN_THRESHOLD = 10        # Trajectories before auto-triggering training
+TRAIN_THRESHOLD = 10        # Trajectories before suggesting a retrain
 GRPO_GROUP_SIZE = 4         # Responses generated per training prompt (G)
 GRPO_BATCH_SIZE = 4         # Trajectory batch size
 TRAIN_BUFFER_SAMPLE = 40    # Trajectories sampled per training run
@@ -130,11 +130,13 @@ You are compiling a personal ML/quantization research wiki. \
 Given source excerpts about a concept, write a comprehensive wiki article.
 
 Requirements:
-- Lead with a clear 2-sentence definition
+- Lead with a clear 2-sentence definition/summary
 - Use [[WikiLink]] syntax for any concept that deserves its own article
-- Sections: ## Definition, ## Context, ## Key Claims, ## Connections, ## Sources
+- Sections: ## Context, ## Key Claims, ## Connections, ## Sources
+- In Key Claims, number each claim and note which source it comes from
+- In Connections, explain how this relates to other wiki concepts using [[WikiLinks]]
+- In Sources, list each source with specific section/table references
 - 300–800 words, factual, no hallucination
-- Cite specific claims to source document names in the Sources section
 - Write for a researcher who already knows ML fundamentals
 """
 

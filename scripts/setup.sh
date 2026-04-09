@@ -1,23 +1,31 @@
 #!/bin/bash
 set -e
-cd /home/ec2-user/SageMaker/personal-knowledge
+cd "$(dirname "$0")/.."
 
-echo "=== Installing dependencies ==="
-pip install peft trl sentence-transformers bitsandbytes rank-bm25 \
-    pdfminer.six typer rich fastapi uvicorn sqlitedict networkx httpx
+echo "=== Checking for uv ==="
+if ! command -v uv &> /dev/null; then
+    echo "uv not found. Installing..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+fi
 
-echo "=== Installing package ==="
-pip install -e .
+echo "=== Creating virtual environment and installing dependencies ==="
+uv sync
 
 echo "=== Verifying GPU ==="
-python3 -c "import torch; print(f'GPU: {torch.cuda.is_available()}, VRAM: {torch.cuda.get_device_properties(0).total_memory/1e9:.1f}GB' if torch.cuda.is_available() else 'No GPU')"
+uv run python -c "import torch; print(f'GPU: {torch.cuda.is_available()}, VRAM: {torch.cuda.get_device_properties(0).total_mem/1e9:.1f}GB' if torch.cuda.is_available() else 'CPU-only (MPS: {torch.backends.mps.is_available()})')"
 
 echo "=== Checking HF cache for required models ==="
-python3 - <<'EOF'
+uv run python - <<'EOF'
 import os
-HF_CACHE = "/home/ec2-user/SageMaker/hf_cache/hub"
+
+HF_CACHE = os.path.expanduser("~/.cache/huggingface/hub")
+# Also check SageMaker path for EC2 setups
+ALT_CACHE = "/home/ec2-user/SageMaker/hf_cache/hub"
+cache_dir = ALT_CACHE if os.path.exists(ALT_CACHE) else HF_CACHE
+
 needed = ["Qwen3-4B", "Qwen3-1.7B"]
-found = os.listdir(HF_CACHE) if os.path.exists(HF_CACHE) else []
+found = os.listdir(cache_dir) if os.path.exists(cache_dir) else []
 for model in needed:
     matches = [d for d in found if model.lower() in d.lower()]
     status = "FOUND: " + str(matches) if matches else "MISSING"

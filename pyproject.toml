@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "lore-kb"
 version = "0.1.0"
-description = "Personal ML research knowledge base with evolving agent"
+description = "Agent-maintained personal knowledge wiki with RL training loop"
 requires-python = ">=3.10"
 dependencies = [
     "peft>=0.10.0",
@@ -40,7 +40,6 @@ lore-query = "lore.cli.wiki_cli:query_main"
 lore-cleanup = "lore.cli.wiki_cli:cleanup_main"
 lore-reorganize = "lore.cli.wiki_cli:reorganize_main"
 lore-train = "lore.cli.evolve_cli:main"
-lore-web = "lore.web.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lore"]

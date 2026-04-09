@@ -111,44 +111,44 @@ def extract_concepts(chunks: list[IngestedChunk]) -> list[str]:
         return re.findall(r'"([^"]+)"', response)
 
 
-def synthesize_article(concept: str, chunks: list[IngestedChunk]) -> str:
+def synthesize_article(concept: str, chunks: list[IngestedChunk]) -> tuple[str, list[str]]:
     """
     Compile a wiki article for `concept` from the given source chunks.
+    Returns (article_content, source_paths).
     """
     source_text = "\n\n---\n\n".join(
         f"[Source: {c.title}, chunk {c.position}]\n{c.content}"
         for c in chunks[:12]
     )
-    source_names = list({c.title for c in chunks})
+    source_paths = list({c.source_path for c in chunks})
 
     prompt = (
         f"Source excerpts about '{concept}':\n\n{source_text}\n\n"
         f"Write the wiki article for: **{concept}**"
     )
-    return generate(prompt)
+    return generate(prompt), source_paths
 
 
-def write_article(concept: str, content: str, category: str) -> Path:
+def write_article(concept: str, content: str, category: str, source_paths: list[str] | None = None) -> Path:
     """Write a wiki article to disk. Returns the path written."""
     rel_path = article_path(category, concept)
     full_path = WIKI_DIR / rel_path
     full_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Snap all [[WikiLinks]] to existing article titles before writing.
-    # This prevents broken links from ever reaching disk — the root cause
-    # of links like [[The Era of 1-bit LLMs:]] that don't match any slug.
     content = snap_wikilinks(content)
 
-    # Add YAML frontmatter if not present
     if not content.startswith("---"):
         now = datetime.now(timezone.utc).isoformat()
+        sources_yaml = ""
+        if source_paths:
+            sources_yaml = "sources:\n" + "".join(f"  - {p}\n" for p in source_paths)
         frontmatter = (
             f"---\n"
             f"title: {concept}\n"
             f"category: {category}\n"
             f"created: {now}\n"
             f"updated: {now}\n"
-            f"absorbed: true\n"
+            f"{sources_yaml}"
             f"---\n\n"
         )
         content = frontmatter + content
@@ -202,7 +202,7 @@ def absorb(force: bool = False) -> dict:
             continue
 
         print(f"[compile] {concept} ({len(rel_chunks)} chunks)...")
-        article_content = synthesize_article(concept, rel_chunks)
+        article_content, source_paths = synthesize_article(concept, rel_chunks)
 
         # Accurate classification with content snippet; used for the actual write.
         category = classify_article(concept, article_content[:300])
@@ -211,7 +211,7 @@ def absorb(force: bool = False) -> dict:
         # Check is_new BEFORE writing so we know whether the file pre-existed.
         is_new = not (WIKI_DIR / final_rel_path).exists()
 
-        path = write_article(concept, article_content, category)
+        path = write_article(concept, article_content, category, source_paths=source_paths)
 
         if is_new:
             new_articles += 1
