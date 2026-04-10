@@ -22,9 +22,9 @@ data/
 # Outputs (generated artifacts)
 outputs/
 
-# Raw source PDFs (large binaries — ingest separately)
-raw/papers/*.pdf
-raw/articles/*.pdf
+# Raw sources and wiki (local content, not tracked)
+raw/
+wiki/
 
 # Environment
 .env

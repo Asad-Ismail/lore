@@ -6,7 +6,11 @@
       "Bash(python3 -c \"from lore.config import WIKI_DIR; print\\('import OK:', WIKI_DIR\\)\")",
       "Bash(pip install:*)",
       "Bash(python3 -c \"from lore.config import WIKI_DIR, DATA_DIR; print\\('✓ lore.config imports OK'\\); print\\('  WIKI_DIR:', WIKI_DIR\\); print\\('  DATA_DIR:', DATA_DIR\\)\")",
-      "Bash(lore status:*)"
+      "Bash(lore status:*)",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(uv run:*)",
+      "Bash(dd:*)",
+      "Bash(ls:*)"
     ]
   }
 }

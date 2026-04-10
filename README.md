@@ -1,12 +1,12 @@
 <div align="center">
 
-```
+<pre style="display:inline-block;text-align:left">
+ _
 | |    ___  _ __ ___
 | |   / _ \| '__/ _ \
 | |__| (_) | | |  __/
 |_____\___/|_|  \___|
-```
-
+</pre>
 
 **A personal knowledge wiki maintained by your LLM agent. Knowledge compounds with every source you add and every question you ask.**
 
@@ -18,7 +18,7 @@ Based on [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf5
 
 ## What This Is
 
-Your LLM agent ([Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)) builds and maintains a persistent, interlinked wiki from your raw sources — not RAG, but compiled knowledge that compounds over time. Lore extends this with an [OpenClaw-RL](https://github.com/Gen-Verse/OpenClaw-RL)-style RL loop that trains a local model on your query trajectories via OPD → GRPO.
+Your LLM agent ([Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)) builds and maintains a persistent, interlinked wiki from your raw sources, not RAG, but compiled knowledge that compounds over time. Lore extends this with an [OpenClaw-RL](https://github.com/Gen-Verse/OpenClaw-RL)-style RL loop that trains a local model on your query trajectories via OPD → GRPO.
 
 ---
 
@@ -33,6 +33,7 @@ Open the repo in your agent (Cursor, Claude Code, Codex). The agent reads `CLAUD
 
 ```
 "Ingest raw/papers/some-paper.pdf"
+"Ingest https://arxiv.org/abs/2306.00978"
 "What are the key differences between X and Y?"
 "Run a health check on the wiki"
 ```
@@ -78,31 +79,32 @@ uv run lore-train train                     # fine-tune local model
 ## Architecture
 
 ```
-                         ┌─────────────────────────────────────────┐
-                         │              WIKI LOOP                  │
-                         │          (agent-maintained)             │
-                         │                                         │
-  raw/papers/  ──┐       │  agent reads source directly            │
-  raw/articles/ ─┼──────►│  agent writes/updates wiki/*.md         │
-  raw/repos/   ──┘       │  agent maintains [[WikiLinks]]          │
-                         │  agent updates _index.md and _log.md    │
-                         └────────────────────────┬────────────────┘
-                                                  │
-                              agent navigates wiki via _index.md
-                              (no embeddings, no vector search)
-                                                  │
-                         ┌────────────────────────▼────────────────┐
-                         │          RL LOOP (optional)             │
-                         │       (local model, runs separately)    │
-                         │                                         │
-  lore query ───────────►│  local Qwen3-1.7B + LoRA reads wiki    │
-  (trajectory capture)   │  generates its own answer               │
-                         │  4-signal reward computed               │
-                         │  trajectory saved                       │
-                         │                                         │
-                         │  OPD (first 50) → GRPO (after 50)      │
-                         │  divergence guard → auto-rollback       │
-                         └─────────────────────────────────────────┘
+                     ┌──────────────────────────────────────────┐
+                     │              WIKI LOOP                   │
+                     │          (agent-maintained)              │
+                     │                                          │
+  raw/papers/  ──┐   │  agent reads source directly             │
+  raw/articles/ ─┼──►│  agent writes/updates wiki/*.md          │
+  raw/repos/   ──┘   │  agent maintains [[WikiLinks]]           │
+                     │  agent updates _index.md and _log.md     │
+                     └────────────────┬─────────────────────────┘
+                                      │
+                        agent navigates wiki via _index.md
+                        (no embeddings, no vector search)
+                                      │
+                                      ▼
+                     ┌──────────────────────────────────────────┐
+                     │         RL LOOP (optional)               │
+                     │   (local model, runs separately)         │
+                     │                                          │
+  lore query ───────►│  local LLM + LoRA reads wiki     │
+  (trajectory        │  generates its own answer                │
+   capture)          │  4-signal reward computed                │
+                     │  trajectory saved                        │
+                     │                                          │
+                     │  OPD (first 50) → GRPO (after 50)       │
+                     │  divergence guard → auto-rollback        │
+                     └──────────────────────────────────────────┘
 ```
 
 ---

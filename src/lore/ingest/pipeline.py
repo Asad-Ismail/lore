@@ -103,39 +103,72 @@ def ingest_file(path: str | Path, force: bool = False) -> list[IngestedChunk]:
     return ingested
 
 
+def _is_arxiv_url(url: str) -> bool:
+    return "arxiv.org" in url
+
+
+def _arxiv_pdf_url(url: str) -> str | None:
+    """Extract arXiv PDF URL from any arXiv link (/abs/, /html/, /pdf/)."""
+    import re
+    m = re.search(r"arxiv\.org/(?:abs|html|pdf)/(\d+\.\d+)(v\d+)?", url)
+    if m:
+        paper_id = m.group(1)
+        version = m.group(2) or ""
+        return f"https://arxiv.org/pdf/{paper_id}{version}"
+    return None
+
+
+def _download_pdf(url: str, dest: Path) -> None:
+    """Download a PDF file to dest."""
+    import httpx
+    with httpx.stream("GET", url, follow_redirects=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in r.iter_bytes():
+                f.write(chunk)
+
+
 def ingest_url(url: str) -> list[IngestedChunk]:
     """
-    Fetch a URL and ingest it as a markdown document.
-    Saves to raw/articles/<slug>.md, then ingests that file.
+    Fetch a URL and ingest it.
+    For arXiv: downloads the PDF directly (preserves the real source document).
+    For web articles: fetches HTML and converts to markdown.
     """
     import re
-    import subprocess
-    import sys
 
-    # Use httpx for fetching
+    slug = re.sub(r"[^\w]+", "-", url.split("//")[-1].rstrip("/"))[:80]
+    paper_domains = ["arxiv.org", "openreview.net", "aclanthology.org", "semanticscholar.org"]
+    subdir = "papers" if any(d in url for d in paper_domains) else "articles"
+
+    # arXiv: download the actual PDF
+    pdf_url = _arxiv_pdf_url(url) if _is_arxiv_url(url) else None
+    if pdf_url:
+        dest = RAW_DIR / subdir / f"{slug}.pdf"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[fetch] Downloading PDF: {pdf_url}")
+        _download_pdf(pdf_url, dest)
+        print(f"[ok] Saved to {dest}")
+        return ingest_file(dest)
+
+    # Everything else: fetch HTML → markdown
+    import httpx
     try:
-        import httpx
         response = httpx.get(url, follow_redirects=True, timeout=30)
         response.raise_for_status()
         html = response.text
     except Exception as e:
         raise RuntimeError(f"Failed to fetch {url}: {e}")
 
-    # Convert HTML to markdown using markdownify if available, else strip tags
     try:
         import markdownify
         content = markdownify.markdownify(html, heading_style="ATX")
     except ImportError:
-        # Fallback: strip HTML tags
         content = re.sub(r"<[^>]+>", " ", html)
         content = re.sub(r"\s+", " ", content).strip()
 
-    # Generate slug from URL
-    slug = re.sub(r"[^\w]+", "-", url.split("//")[-1].rstrip("/"))[:80]
-    dest = RAW_DIR / "articles" / f"{slug}.md"
+    dest = RAW_DIR / subdir / f"{slug}.md"
     dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Extract title from HTML
     title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     title = title_m.group(1).strip() if title_m else slug
 
