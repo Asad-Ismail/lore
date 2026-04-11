@@ -10,8 +10,6 @@
 
 </div>
 
-<p align="center"><strong>Feed it anything. Ask questions. A local model learns your curiosity and tells you what to explore next.</strong></p>
-
 <p align="center"><em>Agent-maintained wiki that learns your questions and proactively suggests what to explore. Works with Claude Code, Cursor, Codex.</em></p>
 
 ---
@@ -20,10 +18,9 @@
 
 ```bash
 git clone git@github.com:Asad-Ismail/lore.git && cd lore
-uv sync && bash scripts/setup.sh
 ```
 
-Open in Claude Code (or Cursor or Codex) and tell the agent:
+Open in your agent and start talking:
 
 ```
 "Ingest https://arxiv.org/abs/2306.00978"
@@ -123,11 +120,15 @@ lore-train rollback          # roll back checkpoints
 
 ## Agent Setup
 
+```bash
+bash scripts/setup.sh   # creates directories, seed files, installs deps
+```
+
 | Agent | How to start |
 |---|---|
-| **Claude Code** | `claude` in repo root |
-| **Cursor** | Open repo — `CLAUDE.md` auto-read |
-| **Codex** | Copy `CLAUDE.md` to `AGENTS.md` |
+| **Claude Code** | `claude` in repo root — reads `CLAUDE.md` automatically |
+| **Cursor** | Open repo — copy `CLAUDE.md` content to `.cursorrules` |
+| **Codex** | Open repo — copy `CLAUDE.md` to `AGENTS.md` |
 
 ---
 
