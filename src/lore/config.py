@@ -49,7 +49,7 @@ MAX_GRAD_NORM = 1.0
 GRPO_BATCH_SIZE = 4
 
 # ── Curiosity training ───────────────────────────────────────────────────────
-CURIOSITY_TRAIN_THRESHOLD = 15   # Question traces before suggesting training
+CURIOSITY_TRAIN_THRESHOLD = 3   # Question traces before suggesting training
 CURIOSITY_BOOTSTRAP_N = 30       # SFT before switching to GRPO
 CURIOSITY_GROUP_SIZE = 4         # Candidate questions per wiki state
 CURIOSITY_REWARD_WEIGHT_GAP = 0.35

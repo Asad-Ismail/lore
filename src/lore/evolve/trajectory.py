@@ -33,7 +33,13 @@ def capture_question_trace(question: str, wiki_state: str) -> QuestionTrace:
     """Record a user's question + current wiki state for curiosity training."""
     trace = QuestionTrace(question=question, wiki_state=wiki_state)
     save_question_trace(trace)
-    print(f"[curiosity] Question trace saved {trace.id[:8]}")
+    stats = get_question_trace_stats()
+    untrained = stats.get("untrained", 0)
+    remaining = max(0, CURIOSITY_TRAIN_THRESHOLD - untrained)
+    if remaining > 0:
+        print(f"[curiosity] Trace saved ({trace.id[:8]}) — {remaining} more until training")
+    else:
+        print(f"[curiosity] Trace saved ({trace.id[:8]}) — ready to train ({untrained} untrained)")
     _maybe_suggest_curiosity_training()
     return trace
 

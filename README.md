@@ -90,7 +90,7 @@ On a fresh clone, the wiki is empty and there's no trained model. Suggestions ap
 
 ## The Curiosity Loop
 
-Every question you ask gets recorded as a trace: the question + the wiki state when you asked it. A local LLM (default: Qwen3-1.7B + LoRA) trains on your traces — first by imitating your questions (SFT), then by optimizing a 4-signal reward (GRPO):
+Every question you ask gets recorded as a trace: the question + the wiki state when you asked it. A local LLM (default: Qwen3-1.7B + LoRA) trains on your traces, first by imitating your questions (SFT), then by optimizing a 4-signal reward (GRPO):
 
 | Signal | Weight | What it measures |
 |---|---|---|
@@ -99,9 +99,11 @@ Every question you ask gets recorded as a trace: the question + the wiki state w
 | Novelty | 0.25 | Is it something you haven't asked before? |
 | Specificity | 0.15 | Is it specific given current wiki depth? |
 
-Those signals are computed deterministically from the candidate question and wiki state — no LLM-as-judge in the reward.
+Those signals are computed deterministically from the candidate question and wiki state,  no LLM-as-judge in the reward.
 
 The daemon starts automatically (via Stop hook), trains when thresholds are crossed, and caches suggestions. You just talk to the agent. Everything else is automated.
+
+**Health checks** audit the wiki for broken links, orphan articles, stubs, and undiscovered connections — then fix what they find.
 
 ---
 

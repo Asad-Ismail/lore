@@ -49,7 +49,7 @@ def load_student_model():
             device_map=get_device_map(),
             trust_remote_code=True,
         )
-        model = PeftModel.from_pretrained(base, str(latest_ckpt))
+        model = PeftModel.from_pretrained(base, str(latest_ckpt), is_trainable=True)
     else:
         print(f"[trainer] Loading base model: {LORA_BASE_MODEL_ID}")
         base = AutoModelForCausalLM.from_pretrained(
@@ -79,28 +79,6 @@ def _get_latest_checkpoint() -> Path | None:
     checkpoints = sorted(LORA_CHECKPOINTS_DIR.glob("step-*"))
     return checkpoints[-1] if checkpoints else None
 
-
-def grpo_loss(
-    responses_with_rewards: list[tuple[str, torch.Tensor, float]],
-    device: torch.device,
-) -> torch.Tensor:
-    """
-    GRPO loss: -mean( A_i * mean(log_prob_i) )
-    where A_i = (r_i - mean(r)) / (std(r) + eps)
-    """
-    rewards = torch.tensor([r for _, _, r in responses_with_rewards])
-    advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
-
-    total_loss = torch.tensor(0.0, requires_grad=True).to(device)
-    count = 0
-
-    for (_, log_probs, _), advantage in zip(responses_with_rewards, advantages):
-        if log_probs.numel() == 0:
-            continue
-        total_loss = total_loss - advantage.to(device) * log_probs.mean()
-        count += 1
-
-    return total_loss / max(count, 1)
 
 
 def run_curiosity_training() -> dict:
@@ -179,29 +157,42 @@ def run_curiosity_training() -> dict:
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
             input_len = inputs["input_ids"].shape[1]
 
-            responses_with_rewards = []
+            candidates_with_rewards = []
             for _ in range(CURIOSITY_GROUP_SIZE):
                 with torch.no_grad():
                     output = model.generate(
                         **inputs, max_new_tokens=100, do_sample=True,
                         temperature=0.9, top_p=0.95,
                         pad_token_id=tokenizer.eos_token_id,
-                        return_dict_in_generate=True, output_scores=True,
+                        return_dict_in_generate=True,
                     )
 
                 gen_ids = output.sequences[0][input_len:]
                 candidate = tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
                 candidate = candidate.split("\n")[0].strip()
 
-                log_probs = torch.stack(output.scores, dim=1)
-                log_probs = F.log_softmax(log_probs[0], dim=-1)
-                token_lp = log_probs.gather(1, gen_ids.unsqueeze(1)).squeeze(1)
-
                 reward_dict = question_reward(candidate, wiki_state, past_questions)
-                responses_with_rewards.append((candidate, token_lp, reward_dict["combined"]))
+                candidates_with_rewards.append((gen_ids, candidate, reward_dict["combined"]))
+
+            rewards = torch.tensor([r for _, _, r in candidates_with_rewards])
+            advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
             optimizer.zero_grad()
-            loss = grpo_loss(responses_with_rewards, model.device)
+            total_loss = torch.tensor(0.0, device=model.device)
+            count = 0
+
+            for (gen_ids, _, _), advantage in zip(candidates_with_rewards, advantages):
+                if gen_ids.numel() == 0:
+                    continue
+                full_ids = torch.cat([inputs["input_ids"][0], gen_ids]).unsqueeze(0)
+                outputs = model(input_ids=full_ids)
+                logits = outputs.logits[0, input_len - 1:-1, :]
+                log_probs = F.log_softmax(logits, dim=-1)
+                token_lp = log_probs.gather(1, gen_ids.unsqueeze(1)).squeeze(1)
+                total_loss = total_loss - advantage.to(model.device) * token_lp.mean()
+                count += 1
+
+            loss = total_loss / max(count, 1)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
             optimizer.step()

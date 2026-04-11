@@ -48,3 +48,5 @@ hf_cache/
 
 # Misc
 *.log
+assets/demo_gh.mp4
+ffmpeg2pass*
