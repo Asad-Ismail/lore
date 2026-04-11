@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lore.config import WIKI_DIR
-from lore.compile.linker import find_broken_links, find_orphan_articles, build_backlink_map
+from lore.linker import find_broken_links, find_orphan_articles, build_backlink_map
 
 
 def run_health_check(wiki_dir: Path = WIKI_DIR) -> dict:

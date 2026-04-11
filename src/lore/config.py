@@ -14,36 +14,19 @@ HOOKS_DIR = REPO_ROOT / "hooks"
 # ── Data files ────────────────────────────────────────────────────────────────
 FINGERPRINTS_DB = DATA_DIR / "fingerprints.db"
 TFIDF_INDEX_PATH = DATA_DIR / "tfidf_index.pkl"
-EMBEDDINGS_DB = DATA_DIR / "embeddings.db"
-TRAJECTORIES_DB = DATA_DIR / "trajectories.db"
+QUESTION_TRACES_DB = DATA_DIR / "question_traces.db"
 LORA_CHECKPOINTS_DIR = DATA_DIR / "lora_checkpoints"
-ABSORB_PENDING_FLAG = DATA_DIR / ".absorb_pending"
 
 # ── HuggingFace cache ─────────────────────────────────────────────────────────
-HF_CACHE_DIR = Path(os.environ.get("HF_HOME", "/home/ec2-user/SageMaker/hf_cache"))
-HF_HUB_DIR = HF_CACHE_DIR / "hub"
+HF_CACHE_DIR = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
 
 # ── Model IDs ─────────────────────────────────────────────────────────────────
-# Primary inference model (wiki compilation, Q&A, health checks)
-INFERENCE_MODEL_ID = "Qwen/Qwen3-4B"
-
-# LoRA training target (smaller model that gets wiki knowledge baked in)
+# Curiosity training target — learns your questioning patterns
 LORA_BASE_MODEL_ID = "Qwen/Qwen3-1.7B"
 
-# Image captioning (for raw/images/)
-IMAGE_MODEL_ID = "microsoft/Florence-2-base"
-
-# Fallback instruction model
-FALLBACK_MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
-
-# ── Chunking ──────────────────────────────────────────────────────────────────
-CHUNK_SIZE_TOKENS = 512
-CHUNK_OVERLAP_TOKENS = 64
 
 # ── Search ────────────────────────────────────────────────────────────────────
 SEARCH_TOP_K = 8
-SEARCH_RRF_K = 60          # RRF smoothing constant
-SEARCH_RRF_ALPHA = 0.5     # Weight between TF-IDF and embedding
 
 # ── Wiki taxonomy ─────────────────────────────────────────────────────────────
 WIKI_CATEGORIES = [
@@ -57,25 +40,22 @@ WIKI_CATEGORIES = [
     "meta",         # Reading lists, open questions, agendas
 ]
 
-# ── Evolving agent / RL ───────────────────────────────────────────────────────
-TRAIN_THRESHOLD = 10        # Trajectories before suggesting a retrain
-GRPO_GROUP_SIZE = 4         # Responses generated per training prompt (G)
-GRPO_BATCH_SIZE = 4         # Trajectory batch size
-TRAIN_BUFFER_SAMPLE = 40    # Trajectories sampled per training run
+# ── LoRA ──────────────────────────────────────────────────────────────────────
 LORA_RANK = 16
 LORA_ALPHA = 32
 LORA_TARGET_MODULES = ["q_proj", "v_proj", "k_proj", "o_proj"]
 LEARNING_RATE = 1e-4
 MAX_GRAD_NORM = 1.0
-OPD_SWITCH_STD = 0.05       # Switch from OPD to GRPO when reward std > this
-OPD_BOOTSTRAP_N = 50        # Use OPD for first N trajectories
+GRPO_BATCH_SIZE = 4
 
-# ── Reward weights ────────────────────────────────────────────────────────────
-REWARD_WEIGHT_GROUNDING = 0.40
-REWARD_WEIGHT_CITATION = 0.25
-REWARD_WEIGHT_COVERAGE = 0.20
-REWARD_WEIGHT_FLUENCY = 0.15
-GROUNDING_SIM_THRESHOLD = 0.25
+# ── Curiosity training ───────────────────────────────────────────────────────
+CURIOSITY_TRAIN_THRESHOLD = 15   # Question traces before suggesting training
+CURIOSITY_BOOTSTRAP_N = 30       # SFT before switching to GRPO
+CURIOSITY_GROUP_SIZE = 4         # Candidate questions per wiki state
+CURIOSITY_REWARD_WEIGHT_GAP = 0.35
+CURIOSITY_REWARD_WEIGHT_STYLE = 0.25
+CURIOSITY_REWARD_WEIGHT_NOVELTY = 0.25
+CURIOSITY_REWARD_WEIGHT_SPECIFICITY = 0.15
 
 # ── Device helpers ───────────────────────────────────────────────────────────
 
@@ -124,26 +104,3 @@ MAX_NEW_TOKENS = 1024
 TEMPERATURE = 0.7
 TOP_P = 0.9
 
-# ── Compilation prompt ────────────────────────────────────────────────────────
-COMPILE_SYSTEM_PROMPT = """\
-You are compiling a personal ML/quantization research wiki. \
-Given source excerpts about a concept, write a comprehensive wiki article.
-
-Requirements:
-- Lead with a clear 2-sentence definition/summary
-- Use [[WikiLink]] syntax for any concept that deserves its own article
-- Sections: ## Context, ## Key Claims, ## Connections, ## Sources
-- In Key Claims, number each claim and note which source it comes from
-- In Connections, explain how this relates to other wiki concepts using [[WikiLinks]]
-- In Sources, list each source with specific section/table references
-- 300–800 words, factual, no hallucination
-- Write for a researcher who already knows ML fundamentals
-"""
-
-QUERY_SYSTEM_PROMPT = """\
-You are answering questions about an ML research wiki. \
-Answer based ONLY on the wiki context provided. \
-If the answer is not fully covered, say so explicitly rather than speculating.
-Cite the source articles you used using [[ArticleName]] syntax.
-Be precise and technical.
-"""

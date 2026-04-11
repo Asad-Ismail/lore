@@ -1,16 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find /home/ec2-user/SageMaker/personal-knowledge/src/lore -name \"__pycache__\" -type d -exec rm -rf {} +)",
-      "Bash(python3 -c \"import ast, pathlib; [ast.parse\\(f.read_text\\(\\)\\) for f in pathlib.Path\\('src/lore'\\).rglob\\('*.py'\\)]; print\\('All parse OK'\\)\")",
-      "Bash(python3 -c \"from lore.config import WIKI_DIR; print\\('import OK:', WIKI_DIR\\)\")",
-      "Bash(pip install:*)",
-      "Bash(python3 -c \"from lore.config import WIKI_DIR, DATA_DIR; print\\('✓ lore.config imports OK'\\); print\\('  WIKI_DIR:', WIKI_DIR\\); print\\('  DATA_DIR:', DATA_DIR\\)\")",
-      "Bash(lore status:*)",
-      "WebFetch(domain:arxiv.org)",
       "Bash(uv run:*)",
-      "Bash(dd:*)",
-      "Bash(ls:*)"
+      "Bash(bash hooks/:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:arxiv.org)",
+      "WebSearch",
+      "Bash(bash:*)"
     ]
   }
 }

@@ -30,21 +30,10 @@ def ingest_cmd(
 
     if chunks:
         rprint(f"[green]✓[/green] Ingested {len(chunks)} chunks from: {source}")
-        rprint("[yellow]Run 'lore-absorb' to compile new content into the wiki.[/yellow]")
+        rprint("[yellow]Source saved to raw/. Tell your agent to ingest it.[/yellow]")
     else:
         rprint(f"[yellow]Skipped (already ingested or empty): {source}[/yellow]")
 
-
-@app.command("absorb")
-def absorb_cmd(
-    force: bool = typer.Option(False, "--force", "-f", help="Recompile all articles even if unchanged"),
-):
-    """Compile unprocessed raw sources into wiki articles."""
-    from lore.compile.compiler import absorb
-    stats = absorb(force=force)
-    rprint(f"[green]✓[/green] Absorb complete:")
-    for key, val in stats.items():
-        rprint(f"  {key}: {val}")
 
 
 @app.command("search")
@@ -53,8 +42,8 @@ def search_cmd(
     top_k: int = typer.Option(8, "--top-k", "-k", help="Number of results"),
     full: bool = typer.Option(False, "--full", help="Show full article content"),
 ):
-    """Search the wiki with hybrid TF-IDF + embedding search."""
-    from lore.index.search import search_and_read, format_search_results, hybrid_search
+    """Search the wiki with TF-IDF search."""
+    from lore.index.search import search_and_read, format_search_results, search_wiki
 
     if full:
         results = search_and_read(query, top_k=top_k)
@@ -62,37 +51,29 @@ def search_cmd(
             rprint(f"\n[bold cyan]=== {r.title} ({r.article_path}) ===[/bold cyan]")
             rprint(content[:3000])
     else:
-        results = hybrid_search(query, top_k=top_k)
+        results = search_wiki(query, top_k=top_k)
         rprint(format_search_results(results))
 
 
 @app.command("rebuild-index")
-def rebuild_index_cmd(
-    no_embeddings: bool = typer.Option(False, "--no-embeddings", help="Skip embedding index (faster)"),
-):
-    """Rebuild the TF-IDF and embedding search indexes."""
+def rebuild_index_cmd():
+    """Rebuild the TF-IDF search index."""
     from lore.index.store import rebuild_index
-    stats = rebuild_index(use_embeddings=not no_embeddings)
+    stats = rebuild_index()
     rprint(f"[green]✓[/green] Index rebuilt: {stats['articles']} articles")
 
 
-@app.command("query")
-def query_cmd(
-    question: str = typer.Argument(..., help="Question to answer using the wiki"),
-    top_k: int = typer.Option(8, "--top-k", "-k"),
-    no_capture: bool = typer.Option(False, "--no-capture", help="Skip trajectory capture"),
+
+@app.command("trace")
+def trace_cmd(
+    question: str = typer.Argument(..., help="The question to record"),
 ):
-    """Answer a question using the wiki (RAG + trajectory capture)."""
-    from lore.query.agent import answer_question
-    result = answer_question(
-        question,
-        top_k=top_k,
-        capture_trajectory=not no_capture,
-    )
-    rprint(f"\n[bold]Q:[/bold] {question}\n")
-    rprint(f"[bold]A:[/bold] {result.answer}\n")
-    if result.output_path:
-        rprint(f"[dim]Report: {result.output_path}[/dim]")
+    """Capture a question trace for curiosity training (no GPU needed)."""
+    from lore.evolve.curiosity import build_wiki_state_summary
+    from lore.evolve.trajectory import capture_question_trace
+    wiki_state = build_wiki_state_summary()
+    trace = capture_question_trace(question, wiki_state)
+    rprint(f"[green]✓[/green] Question trace saved ({trace.id[:8]})")
 
 
 @app.command("health")
@@ -115,7 +96,7 @@ def cleanup_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be fixed without writing"),
 ):
     """Fix broken [[WikiLinks]], rebuild backlinks, report merged stubs."""
-    from lore.compile.linker import find_broken_links, rebuild_all_backlinks, snap_wikilinks
+    from lore.linker import find_broken_links, rebuild_all_backlinks, snap_wikilinks
     from lore.config import WIKI_DIR
 
     # 1. Find broken links
@@ -149,56 +130,6 @@ def cleanup_cmd(
             rprint(f"  [[{s}]]")
 
 
-@app.command("reorganize")
-def reorganize_cmd(
-    dry_run: bool = typer.Option(True, "--dry-run/--apply",
-                                  help="Propose moves (default) or apply them"),
-):
-    """Re-examine articles for taxonomy misclassification and propose rerouting."""
-    import re, shutil
-    from lore.config import WIKI_DIR, WIKI_CATEGORIES
-    from lore.compile.taxonomy import classify_article
-    from lore.index.store import rebuild_index
-
-    moves: list[tuple] = []  # (current_path, proposed_category, article_title)
-
-    for md_file in sorted(WIKI_DIR.rglob("*.md")):
-        if md_file.name.startswith("_") or any(p.name.startswith("_") for p in md_file.parents):
-            continue
-        current_cat = md_file.parent.name
-        if current_cat not in WIKI_CATEGORIES:
-            continue
-        content = md_file.read_text(encoding="utf-8", errors="replace")
-        # Strip frontmatter for classification
-        body = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL)
-        proposed = classify_article(md_file.stem.replace("-", " ").title(), body[:400])
-        if proposed != current_cat:
-            moves.append((md_file, proposed, md_file.stem.replace("-", " ").title()))
-
-    if not moves:
-        rprint("[green]✓[/green] All articles are in the right category.")
-        return
-
-    rprint(f"[yellow]{len(moves)} reclassification suggestions:[/yellow]")
-    for md_file, proposed, title in moves:
-        current = md_file.parent.name
-        rprint(f"  {title}: [red]{current}[/red] → [green]{proposed}[/green]")
-
-    if dry_run:
-        rprint("\n[dim]Run with --apply to move files.[/dim]")
-        return
-
-    # Apply moves
-    for md_file, proposed, title in moves:
-        dest_dir = WIKI_DIR / proposed
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / md_file.name
-        shutil.move(str(md_file), str(dest))
-        rprint(f"  [green]moved:[/green] {title} → {proposed}/")
-
-    # Rebuild index after moves
-    rebuild_index(use_embeddings=False)
-    rprint("[green]✓[/green] Index rebuilt after reorganization.")
 
 
 @app.command("status")
@@ -206,8 +137,6 @@ def status_cmd():
     """Show current knowledge base stats."""
     from lore.config import WIKI_DIR, DATA_DIR
     from lore.ingest.pipeline import get_ingestion_stats
-    from lore.index.store import get_index_stats
-    from lore.evolve.trajectory import get_trajectory_stats
 
     # Wiki article counts
     from collections import Counter
@@ -235,72 +164,23 @@ def status_cmd():
         table.add_row(f"  {cat}", str(cnt))
 
     ingest_stats = get_ingestion_stats()
-    table.add_row("Raw chunks", str(ingest_stats.get("total_chunks", 0)))
-    table.add_row("Unabsorbed chunks", str(ingest_stats.get("unabsorbed", 0)))
+    table.add_row("Ingested sources", str(ingest_stats.get("sources", 0)))
 
-    index_stats = get_index_stats()
-    table.add_row("Index articles", str(index_stats.get("tfidf_articles", 0)))
-
-    traj_stats = get_trajectory_stats()
-    untrained = traj_stats.get("untrained", 0)
-    table.add_row("Trajectories total", str(traj_stats.get("total", 0)))
-    table.add_row("Untrained trajectories", str(untrained))
-    table.add_row("Mean reward (all)", f"{traj_stats.get('mean_reward', 0):.3f}")
+    from lore.evolve.trajectory import get_question_trace_stats, CURIOSITY_SUGGESTED_FLAG
+    q_stats = get_question_trace_stats()
+    table.add_row("Question traces", str(q_stats.get("total", 0)))
+    table.add_row("Untrained traces", str(q_stats.get("untrained", 0)))
 
     console.print(table)
 
-    # Surface training suggestion if flag is set
-    from lore.evolve.trajectory import TRAINING_SUGGESTED_FLAG, TRAIN_THRESHOLD
-    if TRAINING_SUGGESTED_FLAG.exists():
+    if CURIOSITY_SUGGESTED_FLAG.exists():
         rprint(
-            f"\n[bold yellow]⚡ Retrain suggestion:[/bold yellow] "
-            f"{untrained} new trajectories collected (threshold: {TRAIN_THRESHOLD}).\n"
-            f"  Run [bold]lore-train train[/bold] to improve the LoRA model, "
-            f"or keep querying to collect more data first."
+            f"\n[bold yellow]Ready to train:[/bold yellow] "
+            f"{q_stats.get('untrained', 0)} new question traces.\n"
+            f"  Run [bold]lore-train curiosity[/bold] to improve suggestions."
         )
 
 
-@app.command("render")
-def render_cmd(
-    output_type: str = typer.Argument(..., help="Output type: report | slides | charts"),
-    topic: str = typer.Argument("", help="Topic for report/slides"),
-):
-    """Generate output artifacts (reports, slides, charts)."""
-    if output_type == "report":
-        if not topic:
-            rprint("[red]Error: topic required for report[/red]")
-            raise typer.Exit(1)
-        from lore.render.report import generate_report
-        path = generate_report(topic)
-        rprint(f"[green]✓[/green] Report: {path}")
-
-    elif output_type == "slides":
-        if not topic:
-            rprint("[red]Error: topic required for slides[/red]")
-            raise typer.Exit(1)
-        from lore.render.slides import generate_slides
-        path = generate_slides(topic)
-        rprint(f"[green]✓[/green] Slides: {path}")
-
-    elif output_type == "charts":
-        from lore.render.charts import (
-            plot_category_distribution,
-            plot_knowledge_growth,
-            plot_backlink_graph,
-            plot_reward_history,
-        )
-        for fn in [plot_category_distribution, plot_knowledge_growth,
-                   plot_backlink_graph, plot_reward_history]:
-            try:
-                path = fn(save=True)
-                if path:
-                    rprint(f"[green]✓[/green] {path}")
-            except Exception as e:
-                rprint(f"[yellow]warn[/yellow] {fn.__name__}: {e}")
-
-    else:
-        rprint(f"[red]Unknown output type: {output_type}[/red]")
-        rprint("Valid: report | slides | charts")
 
 
 def main():
@@ -319,11 +199,6 @@ def search_main():
     sys.argv = ["lore", "search"] + sys.argv[1:]
     app()
 
-
-def absorb_main():
-    import sys
-    sys.argv = ["lore", "absorb"] + sys.argv[1:]
-    app()
 
 
 def rebuild_index_main():
@@ -344,16 +219,6 @@ def status_main():
     app()
 
 
-def render_main():
-    import sys
-    sys.argv = ["lore", "render"] + sys.argv[1:]
-    app()
-
-
-def query_main():
-    import sys
-    sys.argv = ["lore", "query"] + sys.argv[1:]
-    app()
 
 
 def cleanup_main():
@@ -362,10 +227,11 @@ def cleanup_main():
     app()
 
 
-def reorganize_main():
+def trace_main():
     import sys
-    sys.argv = ["lore", "reorganize"] + sys.argv[1:]
+    sys.argv = ["lore", "trace"] + sys.argv[1:]
     app()
+
 
 
 if __name__ == "__main__":

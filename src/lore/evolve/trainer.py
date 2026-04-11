@@ -1,19 +1,16 @@
 """
-GRPO LoRA training loop for the evolving agent.
+Curiosity training: teaches the local model to ask questions like the user.
 
 Architecture:
 - Base model: Qwen/Qwen3-1.7B (~4 GB VRAM in bf16)
 - LoRA adapter: r=16, alpha=32, targets q/k/v/o_proj (~50 MB)
-- GRPO: generate G=4 responses per prompt, use relative rewards as advantages
-- Async: runs as background subprocess, hot-swaps adapter in serve.py
+- Phase 1 (SFT): imitate user questions given wiki state
+- Phase 2 (GRPO): optimize 4-signal question reward
 """
 
 from __future__ import annotations
 
-import json
-import os
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,15 +21,9 @@ import torch.nn.functional as F
 from lore.config import (
     LORA_BASE_MODEL_ID, HF_CACHE_DIR, LORA_CHECKPOINTS_DIR,
     LORA_RANK, LORA_ALPHA, LORA_TARGET_MODULES,
-    GRPO_GROUP_SIZE, GRPO_BATCH_SIZE, TRAIN_BUFFER_SAMPLE,
+    CURIOSITY_GROUP_SIZE, GRPO_BATCH_SIZE,
     LEARNING_RATE, MAX_GRAD_NORM, get_device_map, get_torch_dtype,
 )
-from lore.evolve.buffer import (
-    sample_trajectories, mark_trajectories_trained, get_reward_stats,
-)
-from lore.evolve.reward import compute_full_reward
-from lore.evolve.distill import should_use_opd, run_opd_step
-from lore.evolve.trajectory import Trajectory
 
 
 def load_student_model():
@@ -48,7 +39,6 @@ def load_student_model():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Check for existing checkpoint
     latest_ckpt = _get_latest_checkpoint()
     if latest_ckpt:
         print(f"[trainer] Loading LoRA checkpoint: {latest_ckpt}")
@@ -85,155 +75,133 @@ def load_student_model():
 
 
 def _get_latest_checkpoint() -> Path | None:
-    """Return the most recent LoRA checkpoint directory, if any."""
     LORA_CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
     checkpoints = sorted(LORA_CHECKPOINTS_DIR.glob("step-*"))
     return checkpoints[-1] if checkpoints else None
 
 
-def generate_group_responses(
-    model,
-    tokenizer,
-    prompt: str,
-    group_size: int = GRPO_GROUP_SIZE,
-    max_new_tokens: int = 256,
-) -> list[tuple[str, torch.Tensor]]:
-    """
-    Generate G responses for a prompt.
-    Returns list of (response_text, log_probs_tensor).
-    """
-    responses = []
-    text = tokenizer.apply_chat_template(
-        [{"role": "user", "content": prompt}],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    inputs = tokenizer([text], return_tensors="pt", truncation=True, max_length=512)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-    input_len = inputs["input_ids"].shape[1]
-
-    for _ in range(group_size):
-        with torch.no_grad():
-            output = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=True,
-                temperature=0.8,
-                top_p=0.9,
-                pad_token_id=tokenizer.eos_token_id,
-                return_dict_in_generate=True,
-                output_scores=True,
-            )
-
-        generated_ids = output.sequences[0][input_len:]
-        response_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-        # Compute per-token log probs
-        log_probs = torch.stack(output.scores, dim=1)  # (1, seq, vocab)
-        log_probs = F.log_softmax(log_probs[0], dim=-1)  # (seq, vocab)
-        token_log_probs = log_probs.gather(
-            1, generated_ids.unsqueeze(1)
-        ).squeeze(1)  # (seq,)
-
-        responses.append((response_text, token_log_probs))
-
-    return responses
-
-
 def grpo_loss(
-    model,
-    tokenizer,
-    trajectory: Trajectory,
     responses_with_rewards: list[tuple[str, torch.Tensor, float]],
+    device: torch.device,
 ) -> torch.Tensor:
     """
-    Compute GRPO loss for a set of group responses.
-
-    Loss = -mean( A_i * mean(log_prob_i) )
-    where A_i = normalized advantage = (r_i - mean(r)) / (std(r) + eps)
+    GRPO loss: -mean( A_i * mean(log_prob_i) )
+    where A_i = (r_i - mean(r)) / (std(r) + eps)
     """
     rewards = torch.tensor([r for _, _, r in responses_with_rewards])
-
-    # Group-relative advantage normalization
     advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
 
-    total_loss = torch.tensor(0.0, requires_grad=True).to(model.device)
+    total_loss = torch.tensor(0.0, requires_grad=True).to(device)
     count = 0
 
-    for (response_text, log_probs, _), advantage in zip(responses_with_rewards, advantages):
+    for (_, log_probs, _), advantage in zip(responses_with_rewards, advantages):
         if log_probs.numel() == 0:
             continue
-        mean_log_prob = log_probs.mean()
-        total_loss = total_loss - advantage.to(model.device) * mean_log_prob
+        total_loss = total_loss - advantage.to(device) * log_probs.mean()
         count += 1
 
     return total_loss / max(count, 1)
 
 
-def run_training(background: bool = False) -> dict:
+def run_curiosity_training() -> dict:
     """
-    Main training loop. Returns stats dict.
-    Runs OPD if reward variance is low, GRPO otherwise.
+    Train the model to generate questions like the user.
+    Phase 1 (< CURIOSITY_BOOTSTRAP_N traces): SFT on user questions.
+    Phase 2 (>= CURIOSITY_BOOTSTRAP_N traces): GRPO with question reward.
     """
-    print(f"[trainer] Starting training run at {datetime.now(timezone.utc).isoformat()}")
-
-    trajectories = sample_trajectories(n=TRAIN_BUFFER_SAMPLE, strategy="curriculum")
-    if not trajectories:
-        print("[trainer] No trajectories to train on.")
-        return {"steps": 0, "reason": "no_trajectories"}
-
-    use_opd = should_use_opd()
-    print(f"[trainer] Mode: {'OPD (distillation)' if use_opd else 'GRPO (RL)'}")
-    print(f"[trainer] Training on {len(trajectories)} trajectories")
-
-    # Load student model
-    model, tokenizer = load_student_model()
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=LEARNING_RATE,
-        weight_decay=0.01,
+    from lore.config import CURIOSITY_BOOTSTRAP_N
+    from lore.evolve.trajectory import (
+        get_all_question_traces, mark_question_traces_trained,
+        get_all_past_questions, CURIOSITY_SUGGESTED_FLAG,
+    )
+    from lore.evolve.curiosity import (
+        question_reward, build_wiki_state_summary, CURIOSITY_SYSTEM_PROMPT,
     )
 
-    stats = {"steps": 0, "mean_loss": 0.0, "mode": "opd" if use_opd else "grpo"}
+    print(f"[curiosity] Starting curiosity training at {datetime.now(timezone.utc).isoformat()}")
+
+    traces = get_all_question_traces(only_untrained=True)
+    if not traces:
+        print("[curiosity] No question traces to train on.")
+        return {"steps": 0, "reason": "no_traces"}
+
+    all_traces = get_all_question_traces()
+    use_sft = len(all_traces) < CURIOSITY_BOOTSTRAP_N
+    print(f"[curiosity] Mode: {'SFT (imitation)' if use_sft else 'GRPO (RL)'}")
+    print(f"[curiosity] Training on {len(traces)} question traces")
+
+    model, tokenizer = load_student_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+
+    stats = {"steps": 0, "mean_loss": 0.0, "mode": "sft" if use_sft else "grpo"}
     losses = []
+    past_questions = get_all_past_questions()
 
-    if use_opd:
-        # OPD: distillation from teacher
-        mean_loss = run_opd_step(model, tokenizer, trajectories, optimizer)
-        losses.append(mean_loss)
-        stats["steps"] = len(trajectories)
-    else:
-        # GRPO: group relative policy optimization
-        for i, traj in enumerate(trajectories[:GRPO_BATCH_SIZE]):
-            print(f"[trainer] GRPO step {i+1}/{min(GRPO_BATCH_SIZE, len(trajectories))}")
-
-            # Build prompt
+    if use_sft:
+        for trace in traces[:20]:
             prompt = (
-                f"Question: {traj.question}\n\n"
-                f"Context:\n{traj.context[:1500]}\n\nAnswer:"
+                f"Wiki state:\n{trace.wiki_state[:1500]}\n\n"
+                f"Generate the question this researcher would ask:"
+            )
+            full_text = prompt + " " + trace.question
+
+            inputs = tokenizer(
+                full_text, return_tensors="pt", max_length=1024, truncation=True,
+            ).to(model.device)
+
+            labels = inputs["input_ids"].clone()
+            prompt_len = len(tokenizer(prompt, return_tensors="pt")["input_ids"][0])
+            labels[0, :prompt_len] = -100
+
+            optimizer.zero_grad()
+            outputs = model(**inputs, labels=labels)
+            loss = outputs.loss
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+            optimizer.step()
+            losses.append(loss.item())
+            stats["steps"] += 1
+    else:
+        wiki_state = build_wiki_state_summary()
+        for trace in traces[:GRPO_BATCH_SIZE]:
+            prompt = (
+                f"Wiki state:\n{trace.wiki_state[:1500]}\n\n"
+                f"Generate a follow-up question this researcher should explore:"
             )
 
-            # Generate group of responses
-            group_responses = generate_group_responses(model, tokenizer, prompt)
+            text = tokenizer.apply_chat_template(
+                [{"role": "system", "content": CURIOSITY_SYSTEM_PROMPT},
+                 {"role": "user", "content": prompt}],
+                tokenize=False, add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            inputs = tokenizer([text], return_tensors="pt", truncation=True, max_length=1024)
+            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            input_len = inputs["input_ids"].shape[1]
 
-            # Score each response
             responses_with_rewards = []
-            for response_text, log_probs in group_responses:
-                # Create temp trajectory for scoring
-                temp_traj = Trajectory(
-                    question=traj.question,
-                    retrieved_paths=traj.retrieved_paths,
-                    context=traj.context,
-                    response=response_text,
-                    citations=[],
-                    citation_validation={},
-                )
-                reward = compute_full_reward(temp_traj, compute_coverage=False)
-                responses_with_rewards.append((response_text, log_probs, reward))
+            for _ in range(CURIOSITY_GROUP_SIZE):
+                with torch.no_grad():
+                    output = model.generate(
+                        **inputs, max_new_tokens=100, do_sample=True,
+                        temperature=0.9, top_p=0.95,
+                        pad_token_id=tokenizer.eos_token_id,
+                        return_dict_in_generate=True, output_scores=True,
+                    )
 
-            # Compute and apply GRPO loss
+                gen_ids = output.sequences[0][input_len:]
+                candidate = tokenizer.decode(gen_ids, skip_special_tokens=True).strip()
+                candidate = candidate.split("\n")[0].strip()
+
+                log_probs = torch.stack(output.scores, dim=1)
+                log_probs = F.log_softmax(log_probs[0], dim=-1)
+                token_lp = log_probs.gather(1, gen_ids.unsqueeze(1)).squeeze(1)
+
+                reward_dict = question_reward(candidate, wiki_state, past_questions)
+                responses_with_rewards.append((candidate, token_lp, reward_dict["combined"]))
+
             optimizer.zero_grad()
-            loss = grpo_loss(model, tokenizer, traj, responses_with_rewards)
+            loss = grpo_loss(responses_with_rewards, model.device)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
             optimizer.step()
@@ -242,33 +210,20 @@ def run_training(background: bool = False) -> dict:
 
     stats["mean_loss"] = float(np.mean(losses)) if losses else 0.0
 
-    # Save checkpoint
     step_count = _count_total_steps() + stats["steps"]
     ckpt_path = LORA_CHECKPOINTS_DIR / f"step-{step_count:06d}"
     model.save_pretrained(str(ckpt_path))
     tokenizer.save_pretrained(str(ckpt_path))
-    print(f"[trainer] Checkpoint saved: {ckpt_path}")
+    print(f"[curiosity] Checkpoint saved: {ckpt_path}")
 
-    # Mark trajectories as trained
-    mark_trajectories_trained([t.id for t in trajectories])
-
-    # Clear the training-suggested flag so the next threshold crossing re-prompts
-    from lore.evolve.trajectory import TRAINING_SUGGESTED_FLAG
-    TRAINING_SUGGESTED_FLAG.unlink(missing_ok=True)
-
-    # Check for reward divergence
-    _check_divergence_guard()
-
-    # Notify serve.py to hot-swap the adapter
-    _signal_hot_swap(ckpt_path)
-
+    mark_question_traces_trained([t.id for t in traces])
+    CURIOSITY_SUGGESTED_FLAG.unlink(missing_ok=True)
     stats["checkpoint"] = str(ckpt_path)
-    print(f"[trainer] Done: {stats}")
+    print(f"[curiosity] Done: {stats}")
     return stats
 
 
 def _count_total_steps() -> int:
-    """Count total training steps from checkpoint names."""
     LORA_CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
     checkpoints = list(LORA_CHECKPOINTS_DIR.glob("step-*"))
     if not checkpoints:
@@ -279,38 +234,10 @@ def _count_total_steps() -> int:
         return len(checkpoints) * GRPO_BATCH_SIZE
 
 
-def _check_divergence_guard() -> None:
-    """Rollback to previous checkpoint if reward is degrading."""
-    stats = get_reward_stats()
-    if stats.get("total", 0) < 50:
-        return  # Not enough data
-
-    recent_mean = stats.get("recent_mean", 0)
-    all_mean = stats.get("all_mean", 0)
-    all_std = stats.get("all_std", 0)
-
-    if recent_mean < all_mean - all_std and all_std > 0.05:
-        print(f"[trainer] DIVERGENCE GUARD: recent_mean={recent_mean:.3f} < "
-              f"all_mean-std={all_mean - all_std:.3f} — rolling back!")
-        _rollback_to_previous_checkpoint()
-
-
-def _rollback_to_previous_checkpoint() -> None:
-    """Delete the most recent checkpoint to roll back."""
+def rollback_checkpoint(n: int = 1) -> None:
+    """Delete the most recent N checkpoints."""
+    import shutil
     checkpoints = sorted(LORA_CHECKPOINTS_DIR.glob("step-*"))
-    if len(checkpoints) >= 2:
-        import shutil
-        bad = checkpoints[-1]
-        shutil.rmtree(str(bad))
-        print(f"[trainer] Rolled back: deleted {bad}")
-
-
-def _signal_hot_swap(ckpt_path: Path) -> None:
-    """Write a signal file for serve.py to pick up."""
-    signal_file = LORA_CHECKPOINTS_DIR / ".new_checkpoint"
-    signal_file.write_text(str(ckpt_path))
-
-
-if __name__ == "__main__":
-    background = "--background" in sys.argv
-    run_training(background=background)
+    for ckpt in checkpoints[-n:]:
+        shutil.rmtree(str(ckpt))
+        print(f"[trainer] Rolled back: deleted {ckpt}")

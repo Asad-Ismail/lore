@@ -78,6 +78,16 @@ How this relates to other wiki articles. Use [[WikiLink]] syntax.
 - [[Activation Aware Quantization]]
 ```
 
+## File Naming
+
+Use the article title as the filename, preserving spaces and casing. Obsidian resolves `[[Post-Training Quantization]]` by looking for `Post-Training Quantization.md` — if you name the file `post-training-quantization.md` (kebab-case), the link breaks.
+
+Examples:
+- `wiki/concepts/Post-Training Quantization.md` (correct)
+- `wiki/concepts/post-training-quantization.md` (wrong — Obsidian won't resolve the wikilink)
+- `wiki/papers/AWQ.md` (correct)
+- `wiki/papers/awq-paper.md` (wrong)
+
 ## WikiLink Conventions
 
 - Use `[[Article Title]]` to link to other wiki articles
@@ -122,7 +132,6 @@ When the user adds a new source (drops a file in `raw/`, gives you a file path, 
 7. **Update `_index.md`**: add entries for any new articles with one-line summaries
 8. **Update `_log.md`**: append an entry: `## [YYYY-MM-DD] ingest | Source Title`
 
-**Local mode alternative:** `lore ingest` + `lore absorb` can run the entire wiki loop using the local LLM (Qwen3-4B) without an agent harness. This is useful for bulk-importing many sources, for running on machines without cloud access, or when the user prefers the CLI workflow. Both modes produce the same wiki format and are interchangeable.
 
 ### Query
 
@@ -137,7 +146,10 @@ When the user asks a question about the wiki:
    - Research gap or open question → add to `meta/open-questions.md`
    - Trivial or conversational answers (yes/no, clarifications, small talk) → don't write anything
    - When in doubt, write it. It's cheap to delete, expensive to lose.
-5. **Capture trajectory** (optional, for RL loop): shell out to `uv run lore query "<question>"` — this runs the *local* model (Qwen3-1.7B) on the same question, computes a reward, and saves a training trajectory. It's not for answering the user's question (you already did that); it's for generating RL training data.
+5. **Capture question trace** (non-blocking): run `uv run lore trace "<question>" &` in the background after every substantive answer.
+6. **Show follow-up suggestions**: run `bash hooks/get_suggestions.sh` and show the suggestions at the bottom of your response. If empty (no trained model yet), generate 2-3 suggestions yourself based on wiki stubs and gaps. The user should ALWAYS see follow-up questions.
+
+The Stop hook (`.claude/settings.json`) runs automatically after each turn — it starts the daemon, triggers training, and caches suggestions. You don't need to manage any of that.
 
 At small-to-moderate scale (~hundreds of articles), the index file is all you need. Only shell out to `uv run lore search "<query>"` if the wiki has grown large enough that scanning the index is insufficient.
 
@@ -214,45 +226,39 @@ These are helpers you shell out to. Install with `uv sync`.
 
 | Command | When to use it |
 |---|---|
+| `uv run lore trace "<question>"` | Capture a question trace for curiosity training (no GPU — always run this after answering) |
 | `uv run lore ingest <path\|url>` | Extract text from PDFs and other binary formats the agent can't read directly |
-| `uv run lore absorb` | Batch-compile unprocessed sources into wiki articles using local LLM (for bulk import without agent supervision) |
 | `uv run lore search "<query>"` | Find relevant articles when wiki is too large for `_index.md` scanning |
-| `uv run lore query "<question>"` | Run the local model on a question and capture an RL training trajectory (not for answering the user — you do that) |
-| `uv run lore rebuild-index` | Refresh the search index (only needed if you use `lore search` or `lore query`) |
 | `uv run lore health` | Automated scan for broken links, orphans, stubs, connections |
 | `uv run lore cleanup` | Auto-fix broken wikilinks, rebuild backlink footers |
-| `uv run lore status` | Wiki stats: article counts, index age, trajectory queue |
-| `uv run lore reorganize` | Detect taxonomy misclassification |
-| `uv run lore render report <topic>` | Generate a long-form markdown research report |
-| `uv run lore render slides <topic>` | Generate a Marp slide deck |
-| `uv run lore-train status` | Check RL training status, reward stats, checkpoint history |
-| `uv run lore-train train` | Trigger LoRA training on accumulated trajectories |
-| `uv run lore-train rollback` | Roll back to a previous LoRA checkpoint |
+| `uv run lore status` | Wiki stats: article counts, question traces |
+| `uv run lore-train serve` | Start daemon — keeps model in memory for instant suggestions |
+| `uv run lore-train curiosity` | Train on your questioning patterns |
+| `uv run lore-train suggest` | Generate follow-up question suggestions |
+| `uv run lore-train status` | Training status, trace count, checkpoints |
+| `uv run lore-train rollback` | Roll back to a previous checkpoint |
 
-## RL Training Extension
+## Curiosity Training
 
-Beyond the base wiki pattern, Lore trains a local model that improves with use.
+A local model (Qwen3-1.7B + LoRA) learns your questioning patterns and suggests follow-up questions.
 
-**How it works:**
-- Every `lore query` captures a trajectory: question, retrieved context, response, reward
-- The reward is a composite of 4 signals: grounding (0.40), citation precision (0.25), coverage (0.20), fluency (0.15)
-- After 10 new trajectories, Lore suggests retraining — run `uv run lore-train train`
-- First 50 trajectories use OPD (teacher distillation: Qwen3-4B → 1.7B)
-- After 50: GRPO (self-improvement via group-relative policy optimization)
-- Divergence guard auto-rolls back if reward degrades
+- Every question you answer captures a trace: the question + the wiki state at that moment
+- After 15 traces → `uv run lore-train curiosity`
+- SFT (first 30 traces): model imitates your actual questions given wiki state
+- GRPO (after 30): model samples candidate questions, scored by gap-targeting (0.35), style similarity (0.25), novelty (0.25), specificity (0.15)
+- `uv run lore-train suggest` generates 2-3 follow-up questions shaped by your patterns
 
-**Models (local, loaded from HF cache — used by CLI tools, not by you):**
-- `Qwen/Qwen3-4B` — teacher model for OPD distillation and coverage judge; also used by `lore absorb` for batch compilation
-- `Qwen/Qwen3-1.7B` — LoRA training target, the evolving local model used by `lore query`
-- `microsoft/Florence-2-base` — image captioning for `raw/images/`
-
-You (the agent harness) do wiki maintenance: reading sources, writing articles, maintaining cross-references. The local models handle trajectory-scored Q&A and improve over time via RL. Both loops compound knowledge — one as markdown, one as weights.
+The Stop hook (`.claude/settings.json`) automatically starts the daemon when a checkpoint exists, triggers training when thresholds are crossed, and caches suggestions. The user runs `uv run lore-train serve` in a separate terminal for instant suggestions (~100ms vs ~17s cold start).
 
 ## Current Context
 
 When discussing a topic, if it's natural and relevant, mention how it relates to what's current — trending repos, recent papers, what the community has adopted, whether the technique is still relevant or has been superseded. Don't force this into every conversation, but when the user is exploring a concept, grounding it in "where things stand today" is valuable. A web search can fill these gaps.
 
 For example, if the user ingests a 2022 GPTQ paper, it's natural to note "GPTQ is still widely used via AutoGPTQ and llama.cpp, but GGUF quantization has largely replaced it for local inference." File these observations into the wiki article when substantive.
+
+## Math
+
+When writing wiki articles that contain math, use LaTeX notation inside `$...$` for inline math and `$$...$$` for block equations. Obsidian renders these natively via MathJax. Raw PDF extractions often have broken math — clean it up when writing wiki articles (e.g. `s_X^alpha` should become `$\mathbf{s}_X^{\alpha}$`).
 
 ## Diagrams
 

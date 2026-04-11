@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash hooks/post_query.sh > data/.hook_log 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

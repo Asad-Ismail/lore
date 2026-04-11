@@ -9,27 +9,52 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.local/bin:$PATH"
 fi
 
-echo "=== Creating virtual environment and installing dependencies ==="
+echo "=== Installing dependencies ==="
 uv sync
 
-echo "=== Verifying GPU ==="
-uv run python -c "import torch; print(f'GPU: {torch.cuda.is_available()}, VRAM: {torch.cuda.get_device_properties(0).total_mem/1e9:.1f}GB' if torch.cuda.is_available() else 'CPU-only (MPS: {torch.backends.mps.is_available()})')"
+echo "=== Verifying device ==="
+uv run python -c "
+import torch
+if torch.cuda.is_available():
+    print(f'Device: CUDA ({torch.cuda.get_device_properties(0).name}, {torch.cuda.get_device_properties(0).total_mem/1e9:.1f}GB)')
+elif torch.backends.mps.is_available():
+    print('Device: MPS (Apple Silicon)')
+else:
+    print('Device: CPU only')
+"
 
-echo "=== Checking HF cache for required models ==="
-uv run python - <<'EOF'
-import os
+echo "=== Creating directories ==="
+mkdir -p raw/{papers,articles,repos,images,notes}
+mkdir -p wiki/{concepts,papers,meta}
+mkdir -p outputs data
 
-HF_CACHE = os.path.expanduser("~/.cache/huggingface/hub")
-# Also check SageMaker path for EC2 setups
-ALT_CACHE = "/home/ec2-user/SageMaker/hf_cache/hub"
-cache_dir = ALT_CACHE if os.path.exists(ALT_CACHE) else HF_CACHE
+# Create seed wiki files if they don't exist
+if [ ! -f wiki/_index.md ]; then
+    cat > wiki/_index.md << 'EOF'
+# Wiki Index
 
-needed = ["Qwen3-4B", "Qwen3-1.7B"]
-found = os.listdir(cache_dir) if os.path.exists(cache_dir) else []
-for model in needed:
-    matches = [d for d in found if model.lower() in d.lower()]
-    status = "FOUND: " + str(matches) if matches else "MISSING"
-    print(f"  {model}: {status}")
+Agent-maintained catalog of all wiki articles. Read this first when answering a query.
+
+## Concepts
+
+## Papers
+
+## Meta
 EOF
+    echo "  Created wiki/_index.md"
+fi
+
+if [ ! -f wiki/_log.md ]; then
+    cat > wiki/_log.md << 'EOF'
+# Wiki Log
+
+Chronological record of operations. Append-only — newest entries at the bottom.
+
+<!-- Format: ## [YYYY-MM-DD] operation | Title -->
+<!-- Parseable with: grep "^## \[" _log.md | tail -5 -->
+EOF
+    echo "  Created wiki/_log.md"
+fi
 
 echo "=== Setup complete ==="
+echo "Open in your agent (Cursor, Claude Code) or run: uv run lore status"

@@ -199,59 +199,6 @@ class JSONExportParser:
         return json.dumps(data, indent=2)
 
 
-# ── Image parser (Florence-2 captioning) ──────────────────────────────────────
-
-class ImageParser:
-    EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-
-    def can_parse(self, path: Path) -> bool:
-        return path.suffix.lower() in self.EXTENSIONS
-
-    def parse(self, path: Path) -> RawDocument:
-        caption = self._caption(path)
-        return RawDocument(
-            content=f"Image: {path.name}\n\n{caption}",
-            title=path.stem.replace("_", " ").replace("-", " ").title(),
-            source_path=str(path),
-            source_type="image",
-            metadata={"caption": caption},
-        )
-
-    def _caption(self, path: Path) -> str:
-        try:
-            from PIL import Image
-            from transformers import AutoProcessor, AutoModelForCausalLM
-            import torch
-            from lore.config import IMAGE_MODEL_ID, HF_CACHE_DIR
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            processor = AutoProcessor.from_pretrained(
-                IMAGE_MODEL_ID,
-                cache_dir=str(HF_CACHE_DIR),
-                trust_remote_code=True,
-            )
-            model = AutoModelForCausalLM.from_pretrained(
-                IMAGE_MODEL_ID,
-                cache_dir=str(HF_CACHE_DIR),
-                trust_remote_code=True,
-            ).to(device)
-
-            image = Image.open(path).convert("RGB")
-            inputs = processor(text="<DETAILED_CAPTION>", images=image, return_tensors="pt").to(device)
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    input_ids=inputs["input_ids"],
-                    pixel_values=inputs["pixel_values"],
-                    max_new_tokens=256,
-                )
-            result = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-            # Florence-2 wraps output in task-specific tags
-            m = re.search(r"<DETAILED_CAPTION>(.*?)</DETAILED_CAPTION>", result, re.DOTALL)
-            return m.group(1).strip() if m else result.strip()
-        except Exception as e:
-            return f"[Image caption unavailable: {e}]"
-
-
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 _PARSERS: list[Parser] = [
@@ -260,7 +207,6 @@ _PARSERS: list[Parser] = [
     PDFParser(),
     CSVParser(),
     JSONExportParser(),
-    ImageParser(),
 ]
 
 
