@@ -13,7 +13,7 @@
 
 <p align="center"><em>Agent-maintained wiki with proactive follow-up questions. Works with Claude Code, Cursor, Codex.</em></p>
 
-https://github.com/user-attachments/assets/93239b4c-d12b-48d1-a610-e305ecc8d949
+https://github.com/user-attachments/assets/63fdbac3-75c5-4947-94b0-27c3ce5fb6ab
 
 Not RAG. Not a chatbot wrapper. Your agent reads sources, writes interlinked wiki articles, and maintains cross-references — while a local LLM trains on your questioning patterns and suggests what to explore next. Inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
 
