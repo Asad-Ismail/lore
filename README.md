@@ -10,22 +10,20 @@
 
 </div>
 
-<p align="center"><strong>Not RAG. Your LLM agent compiles knowledge into a persistent wiki that compounds with every source and every question. A local model learns your research instincts and suggests what to explore next.</strong></p>
+<p align="center"><strong>Feed it anything. Ask questions. A local model learns your curiosity and tells you what to explore next.</strong></p>
 
-<p align="center">Built on <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Wiki</a> + <a href="https://github.com/Gen-Verse/OpenClaw-RL">OpenClaw-RL</a></p>
-
-<!-- demo GIF here -->
+<p align="center"><em>Agent-maintained wiki that learns your questions and proactively suggests what to explore. Works with Claude Code, Cursor, Codex.</em></p>
 
 ---
 
 ## Quick Start
 
 ```bash
-git clone git@github.com:you/lore.git && cd lore
+git clone git@github.com:Asad-Ismail/lore.git && cd lore
 uv sync && bash scripts/setup.sh
 ```
 
-Open in Cursor, Claude Code, or Codex. Tell the agent:
+Open in Claude Code (or Cursor or Codex) and tell the agent:
 
 ```
 "Ingest https://arxiv.org/abs/2306.00978"
@@ -33,9 +31,11 @@ Open in Cursor, Claude Code, or Codex. Tell the agent:
 "Run a health check"
 ```
 
+Or just talk normally, ask questions, and it builds up your wiki over time.
+
 Open `wiki/` in Obsidian. Watch the graph grow.
 
-On a fresh clone, the wiki is empty and there's no trained model. Suggestions appear automatically after ~15 questions and a curiosity training run. Everything builds up from use.
+On a fresh clone, the wiki is empty and there's no trained model. Suggestions appear automatically after a few questions and a curiosity training run (configurable). Everything builds up from use.
 
 ---
 
@@ -62,13 +62,13 @@ On a fresh clone, the wiki is empty and there's no trained model. Suggestions ap
                                    |                                |
                                    |    /suggest --> 2-3 follow-ups |
                                    └────────────────────────────────┘
-                                            |
-                                            v
-                                   agent shows suggestions
-                                   at end of every answer
-                                            |
-                                            v
-                                         (repeat)
+                                                |
+                                                v
+                                        agent shows suggestions
+                                        at end of every answer
+                                                |
+                                                v
+                                            (repeat)
 ```
 
 **Three layers:**
@@ -80,6 +80,8 @@ On a fresh clone, the wiki is empty and there's no trained model. Suggestions ap
 | `CLAUDE.md` | Schema — conventions, workflows | You and agent co-evolve |
 
 **The agent navigates via `_index.md`** — a catalog of every article with one-line summaries. No vector DB, no embeddings. Works surprisingly well at hundreds of articles.
+
+**What it looks like:** `wiki/` is a plain Obsidian vault. Each article is interlinked markdown with `[[WikiLinks]]`. Open the graph view in Obsidian to see your knowledge map take shape.
 
 ---
 
@@ -93,6 +95,8 @@ Every question you ask gets recorded as a trace: the question + the wiki state w
 | Style match | 0.25 | Does it sound like how you ask questions? |
 | Novelty | 0.25 | Is it something you haven't asked before? |
 | Specificity | 0.15 | Is it specific given current wiki depth? |
+
+Those signals are computed deterministically from the candidate question and wiki state — no LLM-as-judge in the reward.
 
 The daemon starts automatically (via Stop hook), trains when thresholds are crossed, and caches suggestions. You just talk to the agent. Everything else is automated.
 
@@ -117,26 +121,19 @@ lore-train rollback          # roll back checkpoints
 
 ---
 
-## Setup
-
-```bash
-git clone git@github.com:you/lore.git && cd lore
-uv sync && bash scripts/setup.sh
-```
+## Agent Setup
 
 | Agent | How to start |
 |---|---|
-| **Cursor** | Open repo — `CLAUDE.md` auto-read |
 | **Claude Code** | `claude` in repo root |
+| **Cursor** | Open repo — `CLAUDE.md` auto-read |
 | **Codex** | Copy `CLAUDE.md` to `AGENTS.md` |
-
-Open `wiki/` in Obsidian as a vault. Graph view shows the wiki's shape.
 
 ---
 
 ## Origin
 
-Built on [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern. Extended with [OpenClaw-RL](https://github.com/Gen-Verse/OpenClaw-RL)-style training and a curiosity loop that learns your questioning patterns. Domain-agnostic — adapt the schema to your needs.
+Inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern. Lore adds the curiosity loop above: question traces, SFT + GRPO, daemon-backed suggestions. Domain-agnostic, adapt the schema to your needs.
 
 ---
 
