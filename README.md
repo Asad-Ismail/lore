@@ -1,24 +1,18 @@
 <div align="center">
 
-<pre style="display:inline-block;text-align:left">
- _
-| |    ___  _ __ ___
-| |   / _ \| '__/ _ \
-| |__| (_) | | |  __/
-|_____\___/|_|  \___|
-</pre>
-
-**Your LLM agent builds a wiki from your sources. A local model learns how you think.**
-
-[Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern + [OpenClaw-RL](https://github.com/Gen-Verse/OpenClaw-RL) training
+```
+                                        _
+                                       | |    ___  _ __ ___
+                                       | |   / _ \| '__/ _ \
+                                       | |__| (_) | | |  __/
+                                       |_____\___/|_|  \___|
+```
 
 </div>
 
----
+<p align="center"><strong>Not RAG. Your LLM agent compiles knowledge into a persistent wiki that compounds with every source and every question. A local model learns your research instincts and suggests what to explore next.</strong></p>
 
-Drop a paper. The agent reads it, writes 10 interlinked wiki articles, updates cross-references, flags contradictions. Ask a question. The agent reads the wiki, answers with citations, files the synthesis back as a new article. Every interaction makes the wiki richer.
-
-Meanwhile, a local model watches how you ask questions — what you dig into, what you skip, where you push deeper. After enough traces, it starts suggesting follow-up questions shaped by your research instincts. The model that suggests your 100th question has been trained on the 99 you asked before it.
+<p align="center">Built on <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy's LLM Wiki</a> + <a href="https://github.com/Gen-Verse/OpenClaw-RL">OpenClaw-RL</a></p>
 
 <!-- demo GIF here -->
 
@@ -48,33 +42,33 @@ On a fresh clone, the wiki is empty and there's no trained model. Suggestions ap
 ## How It Works
 
 ```
-  ┌───────────────────────────────────────────────────────┐
-  │                   WIKI LOOP                           │
-  │                                                       │
-  │  raw/ ──► agent reads ──► wiki/*.md                   │
-  │           [[WikiLinks]], _index.md, _log.md            │
-  │           navigates via _index.md (no embeddings)     │
-  └────────────────────┬──────────────────────────────────┘
-                       │
-         ┌─────────────┼─────────────┐
-         │                           │
-         ▼                           ▼
-   lore trace                   Stop hook
-   (question trace)             (automatic)
-         │                           │
-         ▼                           ▼
-  ┌───────────────────────────────────────────────────────┐
-  │              DAEMON (lore-train serve)                 │
-  │        keeps model in memory on :8765                  │
-  │                                                       │
-  │  Curiosity training (SFT → GRPO)                      │
-  │  learns to ask questions like you                     │
-  │                                                       │
-  │  GET /suggest ──► 2-3 follow-ups (instant)            │
-  └───────────────────────────────────────────────────────┘
-         │
-         ▼
-  agent shows suggestions at end of every answer
+                              raw/ ──> agent reads ──> wiki/*.md ──> Obsidian
+                                            |                |
+                                            |          agent answers
+                                            |          with [[WikiLinks]]
+                                            |                |
+                                            v                v
+                                       lore trace      files answer
+                                       (question +     back into wiki
+                                        wiki state)         |
+                                            |               |
+                                            v               v
+                                   ┌────────────────────────────────┐
+                                   |    daemon (lore-train serve)   |
+                                   |    Qwen3-1.7B + LoRA in memory|
+                                   |                                |
+                                   |    trains on your questions    |
+                                   |    SFT --> GRPO                |
+                                   |                                |
+                                   |    /suggest --> 2-3 follow-ups |
+                                   └────────────────────────────────┘
+                                            |
+                                            v
+                                   agent shows suggestions
+                                   at end of every answer
+                                            |
+                                            v
+                                         (repeat)
 ```
 
 **Three layers:**
