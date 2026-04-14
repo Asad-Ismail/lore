@@ -19,26 +19,37 @@ Not RAG. Not a chatbot wrapper. Your agent reads sources, writes interlinked wik
 
 ---
 
+## Demo In 60 Seconds
+
+```bash
+git clone git@github.com:Asad-Ismail/lore.git && cd lore
+bash scripts/setup.sh --demo
+uv run lore status
+uv run lore search "active memory"
+uv run lore-train suggest
+```
+
+That seeds a starter corpus, five linked wiki pages, three question traces, and cached follow-up
+suggestions. On a fresh clone, suggestions start with a heuristic fallback and become personalized
+after you run `lore-train curiosity`.
+
+Start with these demo prompts:
+
+```
+"How is an LLM wiki different from classic RAG for personal research?"
+"Where does MCP help when the wiki already has a CLI?"
+"Which curiosity signal best captures my taste instead of generic usefulness?"
+```
+
 ## Quick Start
 
 ```bash
 git clone git@github.com:Asad-Ismail/lore.git && cd lore
+bash scripts/setup.sh
 ```
 
-Open in your agent and start talking:
-
-```
-"Ingest https://arxiv.org/abs/2306.00978"
-"What is the tradeoff between GPTQ and AWQ?"
-"Ingest this PDF from my meeting notes"
-"Run a health check"
-```
-
-Or just talk normally — ask questions, and it builds up your wiki over time.
-
-Open `wiki/` in Obsidian (or any markdown editor). Watch the graph grow.
-
-On a fresh clone, the wiki is empty and there's no trained model. Suggestions appear automatically after a few questions and a curiosity training run (configurable). Everything builds up from use.
+Open in your agent and start talking, or use `uv run lore demo` later if you want visible state
+without ingesting your own sources first.
 
 ---
 
@@ -101,7 +112,9 @@ Every question you ask gets recorded as a trace: the question + the wiki state w
 
 Those signals are computed deterministically from the candidate question and wiki state,  no LLM-as-judge in the reward.
 
-The daemon starts automatically (via Stop hook), trains when thresholds are crossed, and caches suggestions. You just talk to the agent. Everything else is automated.
+The daemon starts automatically (via Stop hook), trains when thresholds are crossed, and caches
+suggestions. Before you have a checkpoint, Lore falls back to heuristic suggestions so the workflow
+is still visible on a fresh clone.
 
 **Health checks** audit the wiki for broken links, orphan articles, stubs, and undiscovered connections — then fix what they find.
 
@@ -110,6 +123,7 @@ The daemon starts automatically (via Stop hook), trains when thresholds are cros
 ## CLI
 
 ```bash
+lore demo [--reset]         # seed a reproducible starter wiki
 lore ingest <path|url>       # fetch paper / extract PDF
 lore trace "<question>"      # capture question trace (no GPU)
 lore search <query>          # TF-IDF search (for large wikis)
@@ -120,6 +134,7 @@ lore status                  # wiki stats
 lore-train serve             # start daemon (keeps model in memory)
 lore-train curiosity         # train on your questioning patterns
 lore-train suggest           # generate follow-up questions
+lore-train suggest --json    # machine-readable suggestions for hooks/clients
 lore-train status            # trace count, checkpoints
 lore-train rollback          # roll back checkpoints
 ```
@@ -129,14 +144,44 @@ lore-train rollback          # roll back checkpoints
 ## Agent Setup
 
 ```bash
-bash scripts/setup.sh   # creates directories, seed files, installs deps
+bash scripts/setup.sh          # install deps and initialize an empty workspace
+bash scripts/setup.sh --demo   # install deps and seed the starter demo workspace
 ```
+
+## MCP Quick Start
+
+```bash
+uv run lore-mcp --transport stdio
+# or
+uv run lore-mcp --transport http --port 8766
+```
+
+Lore exposes the same search, read, write, health, and suggestion workflow over MCP, so any
+MCP-compatible client can use the same wiki without a second integration layer.
 
 | Agent | How to start |
 |---|---|
 | **Claude Code** | `claude` in repo root — reads `CLAUDE.md` automatically |
 | **Cursor** | Open repo — copy `CLAUDE.md` content to `.cursorrules` |
 | **Codex** | Open repo — copy `CLAUDE.md` to `AGENTS.md` |
+
+---
+
+## Hugging Face Space Demo
+
+The repo includes a deterministic Space app under `space/`. It seeds a writable Lore workspace,
+ingests one URL or uploaded PDF, writes a single wiki page, rebuilds the index, and returns three
+follow-up questions without requiring a local checkpoint.
+
+Build and upload the Space with the Hugging Face CLI:
+
+```bash
+hf auth login
+bash scripts/deploy_space.sh AsadIsmail/lore-demo
+```
+
+The deploy helper first creates a clean bundle with `space/` plus `src/lore/`, so you can ship a
+focused demo instead of the entire repository checkout.
 
 ---
 

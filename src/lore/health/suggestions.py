@@ -12,6 +12,7 @@ from pathlib import Path
 
 from lore.config import WIKI_DIR
 from lore.health.checker import _find_undiscovered_connections, _compute_stats
+from lore.titles import path_to_title
 
 
 def suggest_connections(wiki_dir: Path = WIKI_DIR, max_suggestions: int = 20) -> list[dict]:
@@ -33,7 +34,7 @@ def suggest_new_articles(wiki_dir: Path = WIKI_DIR) -> list[str]:
 
     mention_counts: Counter = Counter()
     existing_titles = {
-        re.sub(r"[^\w\s]", "", f.stem.replace("-", " ").title()).lower().strip()
+        re.sub(r"[^\w\s]", "", path_to_title(f)).lower().strip()
         for f in wiki_dir.rglob("*.md")
         if not f.name.startswith("_")
     }
@@ -60,7 +61,7 @@ def suggest_research_questions(wiki_dir: Path = WIKI_DIR) -> list[str]:
 
     questions = []
     existing = {
-        re.sub(r"[^\w\s]", "", f.stem.replace("-", " ").title()).lower().strip()
+        re.sub(r"[^\w\s]", "", path_to_title(f)).lower().strip()
         for f in wiki_dir.rglob("*.md")
         if not f.name.startswith("_")
     }
@@ -69,7 +70,7 @@ def suggest_research_questions(wiki_dir: Path = WIKI_DIR) -> list[str]:
         if md_file.name.startswith("_") or any(p.name.startswith("_") for p in md_file.parents):
             continue
         content = md_file.read_text(encoding="utf-8", errors="replace")
-        title = md_file.stem.replace("-", " ").title()
+        title = path_to_title(md_file)
 
         # Find concepts mentioned in Connections section but not in wiki
         connections_m = re.search(r"## Connections(.*?)(?=##|\Z)", content, re.DOTALL)

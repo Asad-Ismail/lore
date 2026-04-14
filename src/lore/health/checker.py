@@ -9,6 +9,7 @@ from pathlib import Path
 
 from lore.config import WIKI_DIR
 from lore.linker import find_broken_links, find_orphan_articles, build_backlink_map
+from lore.titles import path_to_title
 
 
 def run_health_check(wiki_dir: Path = WIKI_DIR) -> dict:
@@ -50,7 +51,7 @@ def run_health_check(wiki_dir: Path = WIKI_DIR) -> dict:
 def _find_stub_candidates(wiki_dir: Path) -> list[str]:
     """Return [[WikiLink]] targets that have no corresponding article file."""
     existing_titles = {
-        re.sub(r"[^\w\s]", "", f.stem.replace("-", " ").title()).lower().strip()
+        re.sub(r"[^\w\s]", "", path_to_title(f)).lower().strip()
         for f in wiki_dir.rglob("*.md")
         if not f.name.startswith("_")
     }
@@ -114,8 +115,8 @@ def _find_undiscovered_connections(wiki_dir: Path, max_pairs: int = 20) -> list[
             # Check if they already link to each other
             content_i = contents[i]
             content_j = contents[j]
-            title_i = articles[i].stem.replace("-", " ").title()
-            title_j = articles[j].stem.replace("-", " ").title()
+            title_i = path_to_title(articles[i])
+            title_j = path_to_title(articles[j])
 
             already_linked = (
                 title_j.lower() in content_i.lower()

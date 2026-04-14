@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import typer
 from rich import print as rprint
 from rich.console import Console
@@ -55,13 +57,28 @@ def status_cmd():
 @app.command("suggest")
 def suggest_cmd(
     n: int = typer.Option(3, "--n", "-n", help="Number of suggestions"),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON"),
 ):
     """Generate follow-up question suggestions based on your questioning style."""
-    from lore.evolve.curiosity import generate_suggestions
-    suggestions = generate_suggestions(n=n)
+    from lore.evolve.curiosity import generate_suggestions_with_mode
+
+    suggestions, mode = generate_suggestions_with_mode(n=n)
+    payload = {"mode": mode, "suggestions": suggestions}
+
+    if json_output:
+        print(json.dumps(payload))
+        return
+
     if not suggestions:
         rprint("[yellow]No suggestions — wiki is empty or model not available.[/yellow]")
         return
+
+    if mode == "heuristic":
+        rprint("[yellow]Using heuristic fallback suggestions (no checkpoint yet).[/yellow]\n")
+    elif mode == "daemon":
+        rprint("[green]Using daemon-backed suggestions.[/green]\n")
+    elif mode == "checkpoint":
+        rprint("[green]Using local checkpoint suggestions.[/green]\n")
 
     rprint("\n[bold]Suggested follow-up questions:[/bold]\n")
     for i, s in enumerate(suggestions, 1):

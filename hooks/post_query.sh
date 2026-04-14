@@ -15,6 +15,14 @@ daemon_running() {
     curl -s -o /dev/null -w "%{http_code}" "$DAEMON_URL/health" 2>/dev/null | grep -q "200"
 }
 
+cache_suggestions() {
+    mkdir -p data
+    if uv run lore-train suggest --json --n 3 > "$SUGGESTION_FILE" 2>/dev/null; then
+        return 0
+    fi
+    echo '{"mode":"none","suggestions":[]}' > "$SUGGESTION_FILE"
+}
+
 # Start daemon if checkpoint exists but daemon not running
 if ! daemon_running; then
     if [ -d "$CHECKPOINT_DIR" ] && [ "$(ls -A $CHECKPOINT_DIR 2>/dev/null)" ]; then
@@ -34,5 +42,11 @@ if daemon_running; then
 
     # Cache fresh suggestions
     SUGGESTIONS=$(curl -s "$DAEMON_URL/suggest?n=3" 2>/dev/null || echo "")
-    [ -n "$SUGGESTIONS" ] && echo "$SUGGESTIONS" > "$SUGGESTION_FILE"
+    if [ -n "$SUGGESTIONS" ]; then
+        echo "$SUGGESTIONS" > "$SUGGESTION_FILE"
+    else
+        cache_suggestions
+    fi
+else
+    cache_suggestions
 fi

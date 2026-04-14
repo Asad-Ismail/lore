@@ -2,6 +2,25 @@
 set -e
 cd "$(dirname "$0")/.."
 
+WITH_DEMO=0
+RESET_DEMO=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --demo)
+            WITH_DEMO=1
+            ;;
+        --reset-demo)
+            WITH_DEMO=1
+            RESET_DEMO=1
+            ;;
+        *)
+            echo "Usage: bash scripts/setup.sh [--demo] [--reset-demo]"
+            exit 1
+            ;;
+    esac
+done
+
 echo "=== Checking for uv ==="
 if ! command -v uv &> /dev/null; then
     echo "uv not found. Installing..."
@@ -56,5 +75,21 @@ EOF
     echo "  Created wiki/_log.md"
 fi
 
+if [ "$WITH_DEMO" -eq 1 ]; then
+    echo "=== Seeding demo workspace ==="
+    if [ "$RESET_DEMO" -eq 1 ]; then
+        uv run lore demo --reset
+    else
+        uv run lore demo
+    fi
+fi
+
 echo "=== Setup complete ==="
-echo "Open in your agent (Cursor, Claude Code) or run: uv run lore status"
+if [ "$WITH_DEMO" -eq 1 ]; then
+    echo "Try:"
+    echo "  uv run lore status"
+    echo "  uv run lore search \"active memory\""
+    echo "  uv run lore-train suggest"
+else
+    echo "Open in your agent (Cursor, Claude Code) or run: uv run lore status"
+fi
