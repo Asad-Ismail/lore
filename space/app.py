@@ -192,7 +192,7 @@ def reset_workspace():
 
 ensure_demo_workspace()
 
-with gr.Blocks(css=APP_CSS, title="Lore Demo") as demo:
+with gr.Blocks(title="Lore Demo") as demo:
     gr.Markdown(
         """
         <div class="hero">
@@ -250,4 +250,4 @@ with gr.Blocks(css=APP_CSS, title="Lore Demo") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(css=APP_CSS)
