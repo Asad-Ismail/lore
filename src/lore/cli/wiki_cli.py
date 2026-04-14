@@ -63,6 +63,34 @@ def rebuild_index_cmd():
     rprint(f"[green]✓[/green] Index rebuilt: {stats['articles']} articles")
 
 
+@app.command("demo")
+def demo_cmd(
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        help="Replace raw/, wiki/, data/, and outputs/ with the seeded demo workspace",
+    ),
+):
+    """Seed a reproducible starter corpus for a fresh clone."""
+    from lore.demo import DEMO_QUESTIONS, seed_demo
+
+    try:
+        stats = seed_demo(reset=reset)
+    except RuntimeError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    rprint("[green]✓[/green] Demo workspace ready.")
+    rprint(f"  Articles: {stats['articles']}")
+    rprint(f"  Sources: {stats['sources']}")
+    rprint(f"  Question traces: {stats['traces']}")
+    rprint(f"  Cached suggestions: {stats['suggestions_cached']} ({stats['suggestion_mode']})")
+    rprint("\n[bold]Try these prompts:[/bold]")
+    for i, question in enumerate(DEMO_QUESTIONS, 1):
+        rprint(f"  [cyan]{i}.[/cyan] {question}")
+    rprint("")
+
+
 
 @app.command("trace")
 def trace_cmd(
@@ -178,6 +206,12 @@ def status_cmd():
             f"\n[bold yellow]Ready to train:[/bold yellow] "
             f"{q_stats.get('untrained', 0)} new question traces.\n"
             f"  Run [bold]lore-train curiosity[/bold] to improve suggestions."
+        )
+    elif sum(category_counts.values()) == 0 and q_stats.get("total", 0) == 0:
+        rprint(
+            "\n[bold yellow]Fresh clone detected:[/bold yellow] "
+            "run [bold]bash scripts/setup.sh --demo[/bold] or [bold]uv run lore demo[/bold] "
+            "to seed a starter corpus."
         )
 
 

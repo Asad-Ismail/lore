@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from lore.config import WIKI_DIR
+from lore.titles import path_to_title
 
 
 def extract_wikilinks(content: str) -> list[str]:
@@ -179,8 +180,8 @@ def snap_wikilinks(content: str, wiki_dir: Path = WIKI_DIR) -> str:
 
 
 def _file_to_title(path: Path) -> str:
-    """Convert a wiki file path to a display title."""
-    return path.stem.replace("-", " ").replace("_", " ").title()
+    """Convert a wiki file path to a display title without rewriting acronym casing."""
+    return path_to_title(path)
 
 
 def _normalize_title(title: str) -> str:

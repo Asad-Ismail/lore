@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +12,17 @@ from sqlitedict import SqliteDict
 
 from lore.config import RAW_DIR, FINGERPRINTS_DB
 from lore.ingest.parsers import parse_file, RawDocument
+
+
+@dataclass
+class IngestedSource:
+    """Normalized ingest result for files and URLs."""
+
+    source_ref: str
+    raw_path: str
+    title: str
+    content: str
+    source_type: str
 
 
 def file_sha256(path: Path) -> str:
@@ -21,28 +33,7 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def ingest_file(path: str | Path, force: bool = False) -> str:
-    """
-    Parse a file and register its fingerprint for dedup.
-    Returns the extracted text content (for the agent to read).
-    """
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Not found: {path}")
-
-    fingerprint = file_sha256(path)
-    FINGERPRINTS_DB.parent.mkdir(parents=True, exist_ok=True)
-
-    with SqliteDict(str(FINGERPRINTS_DB), autocommit=True) as fp_db:
-        if not force and fingerprint in fp_db:
-            print(f"[skip] Already ingested: {path.name} ({fingerprint[:8]})")
-            return fp_db[fingerprint].get("extracted_text", "")
-
-    doc = parse_file(path)
-    if doc is None:
-        print(f"[skip] Unsupported file type: {path.suffix}")
-        return ""
-
+def _store_fingerprint_record(fingerprint: str, path: Path, doc: RawDocument) -> None:
     with SqliteDict(str(FINGERPRINTS_DB), autocommit=True) as fp_db:
         fp_db[fingerprint] = {
             "path": str(path),
@@ -51,8 +42,52 @@ def ingest_file(path: str | Path, force: bool = False) -> str:
             "extracted_text": doc.content[:50000],
         }
 
+
+def ingest_file_result(path: str | Path, force: bool = False) -> IngestedSource:
+    """
+    Parse a file and register its fingerprint for dedup.
+    Returns a normalized ingest result with title, path, and extracted text.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Not found: {path}")
+
+    doc = parse_file(path)
+    if doc is None:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+
+    fingerprint = file_sha256(path)
+    FINGERPRINTS_DB.parent.mkdir(parents=True, exist_ok=True)
+
+    with SqliteDict(str(FINGERPRINTS_DB), autocommit=True) as fp_db:
+        if not force and fingerprint in fp_db:
+            cached = fp_db[fingerprint]
+            print(f"[skip] Already ingested: {path.name} ({fingerprint[:8]})")
+            return IngestedSource(
+                source_ref=str(path),
+                raw_path=str(path),
+                title=cached.get("title", doc.title),
+                content=cached.get("extracted_text", doc.content[:50000]),
+                source_type=doc.source_type,
+            )
+
+    _store_fingerprint_record(fingerprint, path, doc)
     print(f"[ok] Ingested: {path.name} ({len(doc.content)} chars)")
-    return doc.content
+    return IngestedSource(
+        source_ref=str(path),
+        raw_path=str(path),
+        title=doc.title,
+        content=doc.content,
+        source_type=doc.source_type,
+    )
+
+
+def ingest_file(path: str | Path, force: bool = False) -> str:
+    """
+    Parse a file and register its fingerprint for dedup.
+    Returns the extracted text content (for the agent to read).
+    """
+    return ingest_file_result(path, force=force).content
 
 
 def _is_arxiv_url(url: str) -> bool:
@@ -69,6 +104,15 @@ def _arxiv_pdf_url(url: str) -> str | None:
     return None
 
 
+def _slugify_url(url: str) -> str:
+    return re.sub(r"[^\w]+", "-", url.split("//")[-1].rstrip("/"))[:80]
+
+
+def _classify_url_subdir(url: str) -> str:
+    paper_domains = ["arxiv.org", "openreview.net", "aclanthology.org", "semanticscholar.org"]
+    return "papers" if any(d in url for d in paper_domains) else "articles"
+
+
 def _download_pdf(url: str, dest: Path) -> None:
     import httpx
     with httpx.stream("GET", url, follow_redirects=True, timeout=60) as r:
@@ -78,16 +122,15 @@ def _download_pdf(url: str, dest: Path) -> None:
                 f.write(chunk)
 
 
-def ingest_url(url: str) -> str:
+def ingest_url_result(url: str) -> IngestedSource:
     """
     Fetch a URL and save to raw/.
     For arXiv: downloads the actual PDF.
     For web articles: fetches HTML and converts to markdown.
-    Returns extracted text content.
+    Returns a normalized ingest result with title, saved raw path, and text.
     """
-    slug = re.sub(r"[^\w]+", "-", url.split("//")[-1].rstrip("/"))[:80]
-    paper_domains = ["arxiv.org", "openreview.net", "aclanthology.org", "semanticscholar.org"]
-    subdir = "papers" if any(d in url for d in paper_domains) else "articles"
+    slug = _slugify_url(url)
+    subdir = _classify_url_subdir(url)
 
     pdf_url = _arxiv_pdf_url(url) if _is_arxiv_url(url) else None
     if pdf_url:
@@ -96,7 +139,9 @@ def ingest_url(url: str) -> str:
         print(f"[fetch] Downloading PDF: {pdf_url}")
         _download_pdf(pdf_url, dest)
         print(f"[ok] Saved to {dest}")
-        return ingest_file(dest)
+        result = ingest_file_result(dest)
+        result.source_ref = url
+        return result
 
     import httpx
     try:
@@ -121,7 +166,19 @@ def ingest_url(url: str) -> str:
 
     dest.write_text(f"# {title}\n\nSource: {url}\n\n{content}", encoding="utf-8")
     print(f"[ok] Saved to {dest}")
-    return ingest_file(dest)
+    result = ingest_file_result(dest)
+    result.source_ref = url
+    return result
+
+
+def ingest_url(url: str) -> str:
+    """
+    Fetch a URL and save to raw/.
+    For arXiv: downloads the actual PDF.
+    For web articles: fetches HTML and converts to markdown.
+    Returns extracted text content.
+    """
+    return ingest_url_result(url).content
 
 
 def get_ingestion_stats() -> dict:

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from lore.titles import stem_to_title
+
 
 @dataclass
 class RawDocument:
@@ -36,7 +38,7 @@ class MarkdownParser:
 
     def parse(self, path: Path) -> RawDocument:
         text = path.read_text(encoding="utf-8", errors="replace")
-        title = _extract_md_title(text) or path.stem
+        title = _extract_md_title(text) or stem_to_title(path.stem)
         metadata = _extract_frontmatter(text)
         # Strip frontmatter from content
         content = re.sub(r"^---\s*\n.*?\n---\s*\n", "", text, flags=re.DOTALL).strip()
@@ -75,7 +77,7 @@ class TextParser:
 
     def parse(self, path: Path) -> RawDocument:
         text = path.read_text(encoding="utf-8", errors="replace")
-        title = path.stem.replace("_", " ").replace("-", " ").title()
+        title = stem_to_title(path.stem)
         return RawDocument(
             content=text,
             title=title,
@@ -94,7 +96,7 @@ class PDFParser:
 
     def parse(self, path: Path) -> RawDocument:
         text = self._extract_text(path)
-        title = _guess_pdf_title(text) or path.stem
+        title = _guess_pdf_title(text) or stem_to_title(path.stem)
         return RawDocument(
             content=text,
             title=title,
@@ -159,7 +161,7 @@ class CSVParser:
             lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
         return RawDocument(
             content="\n".join(lines),
-            title=path.stem.replace("_", " ").title(),
+            title=stem_to_title(path.stem),
             source_path=str(path),
             source_type="csv",
             metadata={"row_count": len(rows), "columns": headers},
@@ -177,7 +179,7 @@ class JSONExportParser:
     def parse(self, path: Path) -> RawDocument:
         data = json.loads(path.read_text(encoding="utf-8"))
         content = self._extract_content(data)
-        title = path.stem.replace("_", " ").title()
+        title = stem_to_title(path.stem)
         return RawDocument(
             content=content,
             title=title,

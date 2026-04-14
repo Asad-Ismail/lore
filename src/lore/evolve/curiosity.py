@@ -18,6 +18,7 @@ from pathlib import Path
 
 from lore.config import (
     WIKI_DIR,
+    LORA_CHECKPOINTS_DIR,
     CURIOSITY_REWARD_WEIGHT_GAP,
     CURIOSITY_REWARD_WEIGHT_STYLE,
     CURIOSITY_REWARD_WEIGHT_NOVELTY,
@@ -230,13 +231,19 @@ Output ONLY the question, nothing else."""
 
 
 def generate_suggestions(n: int = 3) -> list[dict]:
+    suggestions, _ = generate_suggestions_with_mode(n=n)
+    return suggestions
+
+
+def generate_suggestions_with_mode(n: int = 3, prefer_daemon: bool = True) -> tuple[list[dict], str]:
     """
     Generate n candidate questions. Tries the daemon first (~100ms),
     falls back to loading the model directly (~17s).
     """
-    result = _try_daemon_suggest(n)
-    if result is not None:
-        return result
+    if prefer_daemon:
+        result = _try_daemon_suggest(n)
+        if result is not None:
+            return result, "daemon"
 
     from lore.evolve.trajectory import get_all_past_questions
 
@@ -244,7 +251,11 @@ def generate_suggestions(n: int = 3) -> list[dict]:
     past_questions = get_all_past_questions()
 
     if wiki_state == "[Empty wiki]":
-        return []
+        return [], "empty"
+
+    checkpoints = sorted(LORA_CHECKPOINTS_DIR.glob("step-*")) if LORA_CHECKPOINTS_DIR.exists() else []
+    if not checkpoints:
+        return _heuristic_suggestions(n, wiki_state, past_questions), "heuristic"
 
     prompt = (
         f"Wiki state:\n{wiki_state}\n\n"
@@ -258,7 +269,7 @@ def generate_suggestions(n: int = 3) -> list[dict]:
         model, tokenizer = load_student_model()
         model.eval()
     except Exception:
-        return []
+        return _heuristic_suggestions(n, wiki_state, past_questions), "heuristic"
 
     import torch
 
@@ -308,4 +319,55 @@ def generate_suggestions(n: int = 3) -> list[dict]:
         if len(unique) >= n:
             break
 
-    return unique
+    if not unique:
+        return _heuristic_suggestions(n, wiki_state, past_questions), "heuristic"
+
+    return unique, "checkpoint"
+
+
+def _heuristic_suggestions(n: int, wiki_state: str, past_questions: list[str]) -> list[dict]:
+    """Generate follow-up questions without loading a model checkpoint."""
+    from lore.health.suggestions import (
+        suggest_connections,
+        suggest_new_articles,
+        suggest_research_questions,
+    )
+    from lore.index.store import load_all_articles
+
+    candidates: list[str] = []
+
+    for connection in suggest_connections(max_suggestions=max(8, n * 4)):
+        title_a = connection["title_a"]
+        title_b = connection["title_b"]
+        candidates.append(f"What practical relationship between {title_a} and {title_b} is still missing?")
+        candidates.append(f"What is the tradeoff between {title_a} and {title_b} in this workflow?")
+
+    for question in suggest_research_questions():
+        candidates.append(question)
+
+    for concept in suggest_new_articles():
+        candidates.append(
+            f"What should a new article on {concept} cover before I add it to the wiki?"
+        )
+
+    article_titles = [article.title for article in load_all_articles()]
+    for title in article_titles[:4]:
+        candidates.append(f"What is still unresolved in my notes about {title}?")
+
+    if len(article_titles) >= 2:
+        candidates.append(
+            f"Where does {article_titles[0]} overlap with {article_titles[1]}, and where do they differ?"
+        )
+
+    ranked = []
+    seen = set()
+    for candidate in candidates:
+        norm = _normalize(candidate)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        reward = question_reward(candidate, wiki_state, past_questions)
+        ranked.append({"question": candidate, **reward})
+
+    ranked.sort(key=lambda suggestion: suggestion["combined"], reverse=True)
+    return ranked[:n]

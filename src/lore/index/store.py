@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from lore.config import WIKI_DIR, TFIDF_INDEX_PATH
+from lore.titles import path_to_title
 
 
 @dataclass
@@ -32,7 +33,7 @@ def load_all_articles(wiki_dir: Path = WIKI_DIR) -> list[WikiArticle]:
             continue
 
         content = re.sub(r"^---\s*\n.*?\n---\s*\n", "", text, flags=re.DOTALL).strip()
-        title = _extract_title(text) or md_file.stem.replace("-", " ").title()
+        title = _extract_title(text) or path_to_title(md_file)
         category = md_file.parent.name
         snippet = content[:300].replace("\n", " ")
 

@@ -4,7 +4,13 @@ import os
 from pathlib import Path
 
 # ── Root paths ────────────────────────────────────────────────────────────────
-REPO_ROOT = Path(__file__).parent.parent.parent
+#
+# By default Lore writes into the checked-out repository. For demos and hosted
+# environments such as Hugging Face Spaces, callers can point Lore at a separate
+# writable workspace by setting LORE_REPO_ROOT before importing the package.
+REPO_ROOT = Path(
+    os.environ.get("LORE_REPO_ROOT", Path(__file__).parent.parent.parent)
+).expanduser().resolve()
 RAW_DIR = REPO_ROOT / "raw"
 WIKI_DIR = REPO_ROOT / "wiki"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -103,4 +109,3 @@ def get_torch_dtype():
 MAX_NEW_TOKENS = 1024
 TEMPERATURE = 0.7
 TOP_P = 0.9
-
