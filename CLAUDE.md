@@ -146,7 +146,7 @@ When the user asks a question about the wiki:
    - Research gap or open question → add to `meta/open-questions.md`
    - Trivial or conversational answers (yes/no, clarifications, small talk) → don't write anything
    - When in doubt, write it. It's cheap to delete, expensive to lose.
-5. **Capture question trace** (non-blocking): run `uv run lore trace "<question>" &` in the background after every substantive answer.
+5. **Capture question trace**: run `uv run lore trace "<question>"` after every substantive answer. It takes ~400ms and shows how many traces remain until training.
 6. **Show follow-up suggestions**: run `bash hooks/get_suggestions.sh` and show the suggestions at the bottom of your response. If empty (no trained model yet), generate 2-3 suggestions yourself based on wiki stubs and gaps. The user should ALWAYS see follow-up questions.
 
 The Stop hook (`.claude/settings.json`) runs automatically after each turn — it starts the daemon, triggers training, and caches suggestions. You don't need to manage any of that.
