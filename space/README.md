@@ -1,5 +1,5 @@
 ---
-title: Lore Demo
+title: Lore Preview
 emoji: 📚
 colorFrom: yellow
 colorTo: blue
@@ -8,16 +8,18 @@ app_file: app.py
 pinned: false
 ---
 
-# Lore Demo
+# Lore Preview
 
-Ingest one source, write one wiki page, and get three next questions.
+Deterministic preview of Lore's wiki shape: ingest one source, inspect the generated page, browse the vault, and see the wikilink graph.
 
-This Space uses Lore's deterministic demo workflow instead of a heavyweight model checkpoint:
+This Space is intentionally lighter than the full local Lore workflow:
 
 - seeds a writable starter wiki
 - ingests one URL or uploaded PDF/Markdown source
-- writes a single summary page into `wiki/`
-- rebuilds the index and backlinks
-- suggests what to explore next
+- writes a single deterministic summary page into `wiki/`
+- lets you inspect the page list and link graph directly
+- suggests what to explore next with heuristics instead of a live checkpoint
+
+For the full product story, run Lore locally with Claude Code or MCP so the agent can keep maintaining the wiki over time.
 
 Use the repo's `scripts/deploy_space.sh` helper to build a self-contained Space bundle and upload it with the Hugging Face CLI.
