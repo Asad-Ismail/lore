@@ -19,6 +19,7 @@ dependencies = [
     "scikit-learn>=1.4.0",
     "numpy>=1.26.0",
     "httpx>=0.27.0",
+    "fastmcp>=2.0.0",
 ]
 
 [project.scripts]
@@ -30,6 +31,7 @@ lore-status = "lore.cli.wiki_cli:status_main"
 lore-cleanup = "lore.cli.wiki_cli:cleanup_main"
 lore-trace = "lore.cli.wiki_cli:trace_main"
 lore-train = "lore.cli.evolve_cli:main"
+lore-mcp = "lore.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lore"]

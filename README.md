@@ -11,7 +11,7 @@
 
 <p align="center"><strong>Feed it anything. Ask questions. A local model learns your curiosity and tells you what to explore next.</strong></p>
 
-<p align="center"><em>Agent-maintained wiki with proactive follow-up questions. Works with Claude Code, Cursor, Codex.</em></p>
+<p align="center"><em>Agent-maintained wiki with proactive follow-up questions. Works with Claude Code, Cursor, Codex, and any MCP-compatible client.</em></p>
 
 https://github.com/user-attachments/assets/63fdbac3-75c5-4947-94b0-27c3ce5fb6ab
 
@@ -137,6 +137,63 @@ bash scripts/setup.sh   # creates directories, seed files, installs deps
 | **Claude Code** | `claude` in repo root — reads `CLAUDE.md` automatically |
 | **Cursor** | Open repo — copy `CLAUDE.md` content to `.cursorrules` |
 | **Codex** | Open repo — copy `CLAUDE.md` to `AGENTS.md` |
+
+---
+
+<details>
+<summary><strong>MCP Server</strong> — connect any MCP-compatible client (Claude Desktop, etc.)</summary>
+
+Lore exposes an MCP server with 14 tools that mirror the full workflow — search, ingest, write articles, health checks, curiosity suggestions. No functionality is lost compared to the agent-based setup.
+
+#### Local (stdio) — Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "lore": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/lore", "run", "lore-mcp", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+#### Remote (HTTP) — any MCP client over the network
+
+```bash
+# Start the server
+uv run lore-mcp --transport http --port 8766
+
+# Expose via Cloudflare tunnel (brew install cloudflared)
+cloudflared tunnel --url http://127.0.0.1:8766
+# → gives you https://<random>.trycloudflare.com
+# MCP endpoint: https://<random>.trycloudflare.com/mcp
+```
+
+#### Tools
+
+| Tool | What it does |
+|---|---|
+| `read_article` | Read any wiki article by path |
+| `search_wiki` | TF-IDF search with snippets |
+| `search_and_read` | Search + return full article content |
+| `write_article` | Create article (auto-updates `_index.md` + `_log.md`) |
+| `update_article` | Update existing article (auto-logs) |
+| `update_index` | Manual index edits |
+| `append_log` | Manual log entries |
+| `cleanup_links` | Fix broken wikilinks + rebuild backlinks (auto-logs) |
+| `ingest_url` | Download + extract URL to `raw/` (auto-logs) |
+| `run_health_check` | Audit wiki for issues (auto-logs) |
+| `rebuild_index` | Rebuild TF-IDF search index |
+| `generate_suggestions` | Curiosity-driven follow-up questions |
+| `capture_trace` | Record question for training |
+| `get_status` | System overview |
+
+Server binds to `127.0.0.1` by default. Writes are confined to the Lore repo (`wiki/`, `raw/`, `data/`).
+
+</details>
 
 ---
 
