@@ -169,9 +169,11 @@ MCP-compatible client can use the same wiki without a second integration layer.
 
 ## Hugging Face Space Demo
 
-The repo includes a deterministic Space app under `space/`. It seeds a writable Lore workspace,
-ingests one URL or uploaded PDF, writes a single wiki page, rebuilds the index, and returns three
-follow-up questions without requiring a local checkpoint.
+The repo includes a deterministic Space preview under `space/`. It seeds a writable Lore workspace,
+ingests one URL or uploaded PDF, lets visitors browse the generated markdown pages and wikilink
+graph, and returns three follow-up questions without requiring Claude Code, MCP, or a local
+checkpoint. Use it as a public preview of the vault shape; the full agent-maintained workflow still
+lives in the local repo.
 
 Build and upload the Space with the Hugging Face CLI:
 
